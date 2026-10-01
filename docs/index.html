@@ -4,28 +4,27 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CKKS Alternatives Atlas</title>
-<meta name="description" content="Catalogue of CKKS variants, alternative FHE schemes, MPC, TEE and other approaches for private LLM inference, built around the SoK on private LLM inference using approximate homomorphic encryption.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
+<meta name="description" content="Homomorphic encryption schemes and other cryptographic schemes that are alternatives to CKKS for private LLM inference, with CKKS variants, original papers and libraries.">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{
   --bg:#f7f7f4; --surface:#ffffff; --surface-2:#f0efea; --text:#1d1d1b; --muted:#5f5e58; --border:#dddcd4;
   --accent:#2f5d8a; --accent-soft:#e3ecf5;
-  --g0:#2f5d8a; --g1:#1f7f86; --g2:#3c7a5a; --g3:#6a5a9e; --g4:#a0622d; --g5:#9b3d4f; --g6:#4f6f7a; --g7:#7a6a2f; --g8:#555;
+  --g0:#2f5d8a; --g1:#1f7f86; --g2:#3c7a5a; --g3:#6a5a9e; --g4:#a0622d; --g5:#9b3d4f; --g6:#4f6f7a; --g7:#7a6a2f; --g8:#555; --g9:#8a4f7d;
   --ok:#2f7a4a; --warn:#9a6a10; --old:#777;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     --bg:#151614; --surface:#1d1e1b; --surface-2:#262722; --text:#ecebe5; --muted:#a6a59d; --border:#35362f;
     --accent:#8db8e3; --accent-soft:#22303d;
-    --g0:#8db8e3; --g1:#7fd3d9; --g2:#8fcfa9; --g3:#b9a8ec; --g4:#e0a874; --g5:#e48f9f; --g6:#9cc1cc; --g7:#d6c47a; --g8:#bbb;
+    --g0:#8db8e3; --g1:#7fd3d9; --g2:#8fcfa9; --g3:#b9a8ec; --g4:#e0a874; --g5:#e48f9f; --g6:#9cc1cc; --g7:#d6c47a; --g8:#bbb; --g9:#d9a3cc;
     --ok:#8fcfa9; --warn:#e0b860; --old:#999;
   }
 }
 :root[data-theme="dark"]{
   --bg:#151614; --surface:#1d1e1b; --surface-2:#262722; --text:#ecebe5; --muted:#a6a59d; --border:#35362f;
   --accent:#8db8e3; --accent-soft:#22303d;
-  --g0:#8db8e3; --g1:#7fd3d9; --g2:#8fcfa9; --g3:#b9a8ec; --g4:#e0a874; --g5:#e48f9f; --g6:#9cc1cc; --g7:#d6c47a; --g8:#bbb;
+  --g0:#8db8e3; --g1:#7fd3d9; --g2:#8fcfa9; --g3:#b9a8ec; --g4:#e0a874; --g5:#e48f9f; --g6:#9cc1cc; --g7:#d6c47a; --g8:#bbb; --g9:#d9a3cc;
   --ok:#8fcfa9; --warn:#e0b860; --old:#999;
 }
 *{box-sizing:border-box}
@@ -76,43 +75,39 @@ tr.detail dd{margin:0}
 footer{max-width:1400px;margin:0 auto;padding:16px;color:var(--muted);font-size:13px}
 @media (max-width:640px){h1{font-size:22px} .count{margin-left:0}}
 </style>
+<style>
+.libs a{display:inline-block;margin:0 6px 2px 0;font-size:12.5px;white-space:nowrap}
+td.llm{min-width:240px}
+.kind{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+</style>
 </head>
 <body>
 <button class="chip themebtn" id="theme" title="Toggle light/dark">Theme</button>
 <header>
   <h1>CKKS Alternatives Atlas</h1>
-  <p class="lede">A catalogue of approaches to private LLM inference, centred on CKKS. It starts with the CKKS frameworks surveyed in
-  <a href="https://eprint.iacr.org/2026/935">“SoK: Private LLM Inference using Approximate Homomorphic Encryption”</a> (Al Badawi, Alexandru, Polyakov, Vaikuntanathan, 2026).
-  It then lists CKKS variants, bootstrapping advances, alternative FHE schemes, interactive MPC protocols, hardware and statistical alternatives, libraries, and accelerators.</p>
+  <p class="lede">Encryption <b>schemes</b> that can replace or extend CKKS for private LLM inference. Each row is a scheme or a scheme-level variant, not an application paper.
+  The starting point is <a href="https://eprint.iacr.org/2026/935">“SoK: Private LLM Inference using Approximate Homomorphic Encryption”</a> (Al Badawi, Alexandru, Polyakov, Vaikuntanathan, 2026), which studies only CKKS.</p>
   <div class="stats" id="stats"></div>
-  <p><a href="references.html">Browse all 107 references of the SoK →</a> · <a href="data/methods.json">Download the table as JSON</a></p>
+  <p><a href="systems.html">Systems and papers that use these schemes →</a> · <a href="references.html">All 107 SoK references →</a> · <a href="data/schemes.json">Table as JSON</a></p>
 </header>
 <main>
   <details class="guide">
     <summary>How to read this table</summary>
     <ul>
-      <li><b>Group 0</b> holds the CKKS frameworks compared in the SoK. Click “More” for hardware, library, packing class and reported latency.</li>
-      <li><b>Group 1</b> adds 2026 frameworks that appeared after or alongside the SoK, including the first Gentry–Lee matrix-FHE Transformer (Terrazzo) and a hybrid CKKS/TFHE decoder (ROSETTA).</li>
-      <li><b>Groups 2–4</b> are cryptographic building blocks: CKKS variants, CKKS bootstrapping and operation advances, and other FHE schemes such as BGV, BFV, TFHE and the Gentry–Lee matrix scheme.</li>
-      <li><b>Group 5</b> holds interactive protocols (MPC and HE+MPC hybrids). They are often faster than pure CKKS but need many communication rounds and sometimes non-colluding servers.</li>
-      <li><b>Group 6</b> holds non-cryptographic or integrity-only alternatives: GPU and CPU trusted execution environments, differential privacy, split inference and zero-knowledge proofs.</li>
-      <li><b>Groups 7–8</b> are software libraries, compilers and hardware accelerators.</li>
-      <li><b>Packing classes</b> from the SoK: L-ROW token/row, L-COL column/diagonal, L-CYC complex/cyclic, L-ALG algorithmic shortcuts. <b>N-PRE</b> means model-preserving and <b>N-MOD</b> means the model must be modified or retrained.</li>
-      <li>Latencies are as reported by each paper on different hardware and are not directly comparable.</li>
+      <li><b>Assumption</b> is the hardness problem the scheme relies on. Lattice problems (LWE, RLWE, NTRU) are believed to resist quantum attacks; factoring and discrete-log schemes are not.</li>
+      <li><b>Plaintext</b> is what one ciphertext slot holds and which operations are native. CKKS gives approximate reals; BGV/BFV give exact integers; TFHE/FHEW give bits or small integers through lookup tables; Gentry–Lee gives whole matrices.</li>
+      <li><b>SIMD</b> says whether one ciphertext packs many values. This matters most for the large matrix products in LLMs.</li>
+      <li><b>Bootstrapping</b> says whether and how cheaply ciphertext noise can be refreshed, which bounds circuit depth.</li>
+      <li><b>Fit for LLM inference</b> is a one-line judgement of strengths and limits against CKKS.</li>
+      <li>Group 9 lists non-HE primitives (secret sharing, garbled circuits, function secret sharing, functional encryption). They need interaction or leak more, but are the main competitors in practice.</li>
+      <li>Click <b>More</b> for the original paper title, authors, venue and notable follow-up papers.</li>
     </ul>
   </details>
   <div class="controls">
     <div class="row">
-      <input type="search" id="q" placeholder="Search name, scheme, author, comment…" aria-label="Search">
-      <select id="status" aria-label="Status filter">
-        <option value="">All statuses</option>
-      </select>
-      <select id="interaction" aria-label="Interaction filter">
-        <option value="">Any interaction model</option>
-        <option value="non-interactive">Non-interactive</option>
-        <option value="interactive">Interactive</option>
-        <option value="trusted">Trusted hardware</option>
-      </select>
+      <input type="search" id="q" placeholder="Search scheme, assumption, library, follow-up…" aria-label="Search">
+      <select id="status" aria-label="Status filter"><option value="">All statuses</option></select>
+      <select id="pq" aria-label="Post-quantum filter"><option value="">Any security</option><option value="yes">Post-quantum (lattice)</option><option value="no">Not post-quantum</option></select>
       <span class="count" id="count"></span>
     </div>
     <div class="row" id="groups"></div>
@@ -120,14 +115,15 @@ footer{max-width:1400px;margin:0 auto;padding:16px;color:var(--muted);font-size:
   <div class="tablewrap">
     <table>
       <thead><tr>
-        <th data-sort="name">Method</th>
+        <th data-sort="name">Scheme</th>
         <th data-sort="year">Year</th>
-        <th data-sort="family">Type / family</th>
-        <th data-sort="arith">Arithmetic</th>
-        <th data-sort="interaction">Interaction / trust</th>
-        <th data-sort="scale">Largest model shown</th>
-        <th>Links</th>
-        <th data-sort="rel">Relation to CKKS</th>
+        <th data-sort="assumption">Assumption</th>
+        <th data-sort="plaintext">Plaintext / arithmetic</th>
+        <th data-sort="simd">SIMD</th>
+        <th data-sort="boot">Bootstrapping</th>
+        <th data-sort="llm">Fit for LLM inference</th>
+        <th>Original paper</th>
+        <th>Libraries</th>
         <th data-sort="status">Status</th>
         <th></th>
       </tr></thead>
@@ -136,98 +132,55 @@ footer{max-width:1400px;margin:0 auto;padding:16px;color:var(--muted);font-size:
   </div>
 </main>
 <footer>
-  Data lives in <span class="mono">docs/data/methods.json</span>. Links point to ePrint, arXiv, the publisher DOI or the official repository.
-  Compiled October 2026. Entries marked “(see paper)” could not be fully verified from public metadata.
+  Data lives in <span class="mono">docs/data/schemes.json</span>. Paper links point to the IACR ePrint archive or the publisher DOI. Compiled October 2026 from the SoK and an IACR ePrint literature search.
 </footer>
-<script src="data/methods.js"></script>
+<script src="data/schemes.js"></script>
 <script>
 (function(){
-  const M = window.METHODS || [];
-  const groups = [...new Set(M.map(m=>m.group))].sort();
-  const gColor = g => `var(--g${g.charAt(0)})`;
-  const statuses = [...new Set(M.map(m=>m.status))].sort();
-  const $ = id => document.getElementById(id);
-  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-  let active = new Set(groups), sortKey = null, sortDir = 1, open = new Set();
-
-  statuses.forEach(s => { const o=document.createElement('option'); o.value=s; o.textContent=s; $('status').appendChild(o); });
-  groups.forEach(g => {
-    const b=document.createElement('button'); b.className='chip'; b.textContent=g.replace(/^\d+\.\s*/,''); b.setAttribute('aria-pressed','true');
-    b.style.borderLeft=`4px solid ${gColor(g)}`;
-    b.onclick=()=>{ if(active.has(g)) active.delete(g); else active.add(g); b.setAttribute('aria-pressed',active.has(g)); render(); };
-    $('groups').appendChild(b);
-  });
-  const all=document.createElement('button'); all.className='chip'; all.textContent='All / none';
-  all.onclick=()=>{ const on = active.size!==groups.length; active = on? new Set(groups): new Set(); $('groups').querySelectorAll('.chip').forEach((c,i)=>{ if(i<groups.length) c.setAttribute('aria-pressed',on); }); render(); };
+  const M=window.SCHEMES||[];
+  const groups=[...new Set(M.map(m=>m.group))].sort();
+  const gColor=g=>`var(--g${g.charAt(0)})`;
+  const $=id=>document.getElementById(id);
+  const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  let active=new Set(groups), sortKey=null, sortDir=1, open=new Set();
+  [...new Set(M.map(m=>m.status))].sort().forEach(s=>{const o=document.createElement('option');o.value=s;o.textContent=s;$('status').appendChild(o);});
+  groups.forEach(g=>{const b=document.createElement('button');b.className='chip';b.textContent=g.replace(/^\d+\.\s*/,'');b.setAttribute('aria-pressed','true');b.style.borderLeft=`4px solid ${gColor(g)}`;
+    b.onclick=()=>{active.has(g)?active.delete(g):active.add(g);b.setAttribute('aria-pressed',active.has(g));render();};$('groups').appendChild(b);});
+  const all=document.createElement('button');all.className='chip';all.textContent='All / none';
+  all.onclick=()=>{const on=active.size!==groups.length;active=on?new Set(groups):new Set();$('groups').querySelectorAll('.chip').forEach((c,i)=>{if(i<groups.length)c.setAttribute('aria-pressed',on);});render();};
   $('groups').appendChild(all);
-
-  const sCount = g => M.filter(m=>m.group===g).length;
-  $('stats').innerHTML = [
-    [M.length,'entries'],
-    [sCount(groups[0]),'SoK CKKS frameworks'],
-    [M.filter(m=>/^1\./.test(m.group)).length,'newer 2026 frameworks'],
-    [M.filter(m=>/^[234]\./.test(m.group)).length,'schemes and variants'],
-    [M.filter(m=>/^[56]\./.test(m.group)).length,'non-FHE alternatives'],
-    [M.filter(m=>/^[78]\./.test(m.group)).length,'libraries and hardware'],
-  ].map(([n,l])=>`<div class="stat"><b>${n}</b><span>${l}</span></div>`).join('');
-
-  function stCls(s){ s=(s||'').toLowerCase(); if(s.includes('active')) return 'st-active'; if(s.includes('found')) return 'st-found'; if(s.includes('deprec')) return 'st-dep'; if(s.includes('commerc')) return 'st-comm'; return ''; }
-  function links(m){
-    const L=[];
-    if(m.paper) L.push(`<a href="${esc(m.paper)}" target="_blank" rel="noopener">Paper</a>`);
-    else L.push(`<a href="https://scholar.google.com/scholar?q=${encodeURIComponent(m.title||m.name)}" target="_blank" rel="noopener">Search</a>`);
-    if(m.code) L.push(`<a href="${esc(m.code)}" target="_blank" rel="noopener">Code / library</a>`);
-    return `<span class="links">${L.join('')}</span>`;
-  }
-  function detail(m){
-    const f=[['Paper title',m.title],['Authors',m.authors],['Venue',m.venue],['Hardware',m.hardware],['Software',m.library],['Packing class',m.packing],['Reported latency',m.latency],['Open source',m.open_source],['SoK reference',m.sok_ref?`[${m.sok_ref}]`:null],['Comment',m.note]];
-    return `<dl>${f.filter(x=>x[1]).map(([k,v])=>`<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>`;
-  }
-  function match(m){
-    const q=$('q').value.trim().toLowerCase();
-    if(!active.has(m.group)) return false;
-    if($('status').value && m.status!==$('status').value) return false;
-    const it=$('interaction').value, inter=(m.interaction||'').toLowerCase();
-    if(it==='non-interactive' && !inter.includes('non-interactive')) return false;
-    if(it==='interactive' && !(inter.includes('interactive') && !inter.startsWith('non-interactive'))) return false;
-    if(it==='trusted' && !inter.includes('trusted')) return false;
-    if(!q) return true;
-    return Object.values(m).join(' ').toLowerCase().includes(q);
-  }
+  const cnt=re=>M.filter(m=>re.test(m.group)).length;
+  $('stats').innerHTML=[[M.length,'schemes and variants'],[cnt(/^1\./),'CKKS variants'],[cnt(/^[2-7]\./),'other FHE schemes'],[cnt(/^8\./),'partially homomorphic'],[cnt(/^9\./),'non-HE primitives']]
+    .map(([n,l])=>`<div class="stat"><b>${n}</b><span>${l}</span></div>`).join('');
+  const isPQ=m=>/^yes/i.test(m.pq||'');
+  function stCls(s){s=(s||'').toLowerCase();if(s.includes('sota')||s.includes('active'))return 'st-active';if(s.includes('found'))return 'st-found';if(s.includes('deprec'))return 'st-dep';if(s.includes('widely'))return 'st-comm';return '';}
+  function detail(m){const f=[['Paper title',m.title],['Authors',m.authors],['Venue',m.venue],['Post-quantum',m.pq],['Follow-ups and related variants',m.followups]];
+    return `<dl>${f.filter(x=>x[1]).map(([k,v])=>`<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>`;}
+  function match(m){const q=$('q').value.trim().toLowerCase();if(!active.has(m.group))return false;if($('status').value&&m.status!==$('status').value)return false;
+    if($('pq').value==='yes'&&!isPQ(m))return false;if($('pq').value==='no'&&isPQ(m))return false;
+    return !q||JSON.stringify(m).toLowerCase().includes(q);}
   function render(){
     let rows=M.filter(match);
-    if(sortKey){ rows.sort((a,b)=>{ const x=a[sortKey]??'', y=b[sortKey]??''; return (typeof x==='number'&&typeof y==='number'? x-y : String(x).localeCompare(String(y)))*sortDir; }); }
-    else rows.sort((a,b)=> a.group.localeCompare(b.group) || 0);
-    const tb=$('tb'); let h=''; let last=null;
+    if(sortKey)rows.sort((a,b)=>{const x=a[sortKey]??'',y=b[sortKey]??'';return(typeof x==='number'&&typeof y==='number'?x-y:String(x).localeCompare(String(y)))*sortDir;});
+    else rows.sort((a,b)=>a.group.localeCompare(b.group)||a.id-b.id);
+    let h='',last=null;
     rows.forEach(m=>{
-      if(!sortKey && m.group!==last){ last=m.group; h+=`<tr class="grouphead" style="--gc:${gColor(m.group)}"><td colspan="10">${esc(m.group)} <span class="muted">(${rows.filter(r=>r.group===m.group).length})</span></td></tr>`; }
-      h+=`<tr class="item">
-        <td class="name"><b>${esc(m.name)}</b><small>${esc(m.authors||'')}${m.venue?' · '+esc(m.venue):''}</small></td>
-        <td>${esc(m.year)}</td>
-        <td>${esc(m.family)}</td>
-        <td>${esc(m.arith)}</td>
-        <td>${esc(m.interaction)}</td>
-        <td>${esc(m.scale)}</td>
-        <td>${links(m)}</td>
-        <td>${esc(m.rel)}</td>
+      if(!sortKey&&m.group!==last){last=m.group;h+=`<tr class="grouphead" style="--gc:${gColor(m.group)}"><td colspan="11">${esc(m.group)} <span class="muted">(${rows.filter(r=>r.group===m.group).length})</span></td></tr>`;}
+      h+=`<tr class="item"><td class="name"><b>${esc(m.name)}</b><span class="kind">${esc(m.kind)}</span></td><td>${esc(m.year)}</td><td>${esc(m.assumption)}</td><td>${esc(m.plaintext)}</td><td>${esc(m.simd)}</td><td>${esc(m.boot)}</td>
+        <td class="llm">${esc(m.llm)}</td><td class="links"><a href="${esc(m.paper)}" target="_blank" rel="noopener">${esc(m.venue)}</a></td>
+        <td class="libs">${m.libs.length?m.libs.map(([n,u])=>`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(n)}</a>`).join(''):'<span class="muted">none public</span>'}</td>
         <td><span class="tag ${stCls(m.status)}">${esc(m.status)}</span></td>
-        <td class="more"><button data-id="${m.id}" aria-expanded="${open.has(m.id)}">${open.has(m.id)?'Less':'More'}</button></td>
-      </tr>`;
-      if(open.has(m.id)) h+=`<tr class="detail"><td colspan="10">${detail(m)}</td></tr>`;
+        <td class="more"><button data-id="${m.id}" aria-expanded="${open.has(m.id)}">${open.has(m.id)?'Less':'More'}</button></td></tr>`;
+      if(open.has(m.id))h+=`<tr class="detail"><td colspan="11">${detail(m)}</td></tr>`;
     });
-    tb.innerHTML=h || '<tr><td colspan="10" class="muted">No entries match.</td></tr>';
+    $('tb').innerHTML=h||'<tr><td colspan="11" class="muted">No schemes match.</td></tr>';
     $('count').textContent=`${rows.length} of ${M.length} shown`;
   }
-  $('tb').addEventListener('click',e=>{ const b=e.target.closest('button[data-id]'); if(!b) return; const id=+b.dataset.id; open.has(id)?open.delete(id):open.add(id); render(); });
-  document.querySelectorAll('th[data-sort]').forEach(th=>th.onclick=()=>{
-    const k=th.dataset.sort;
-    if(sortKey===k){ if(sortDir===1) sortDir=-1; else { sortKey=null; sortDir=1; } } else { sortKey=k; sortDir=1; }
-    document.querySelectorAll('th').forEach(t=>t.classList.remove('asc','desc'));
-    if(sortKey) th.classList.add(sortDir===1?'asc':'desc');
-    render();
-  });
-  ['q','status','interaction'].forEach(id=>$(id).addEventListener('input',render));
-  $('theme').onclick=()=>{ const r=document.documentElement; const dark = r.dataset.theme ? r.dataset.theme==='dark' : matchMedia('(prefers-color-scheme: dark)').matches; r.dataset.theme = dark?'light':'dark'; };
+  $('tb').addEventListener('click',e=>{const b=e.target.closest('button[data-id]');if(!b)return;const id=+b.dataset.id;open.has(id)?open.delete(id):open.add(id);render();});
+  document.querySelectorAll('th[data-sort]').forEach(th=>th.onclick=()=>{const k=th.dataset.sort;if(sortKey===k){if(sortDir===1)sortDir=-1;else{sortKey=null;sortDir=1;}}else{sortKey=k;sortDir=1;}
+    document.querySelectorAll('th').forEach(t=>t.classList.remove('asc','desc'));if(sortKey)th.classList.add(sortDir===1?'asc':'desc');render();});
+  ['q','status','pq'].forEach(id=>$(id).addEventListener('input',render));
+  $('theme').onclick=()=>{const r=document.documentElement;const d=r.dataset.theme?r.dataset.theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches;r.dataset.theme=d?'light':'dark';};
   render();
 })();
 </script>
