@@ -42,15 +42,15 @@ const arr=(x1,y1,x2,y2,cls,label,lx,ly)=>`<g class="${cls} msg"><line x1="${x1}"
 
 const steps=[
 { key:"Example", who:"both", whoT:"the task", at:0, budget:"—", scale:"×10, ×4, ×40", err:()=>"exact",
-  title:"Two different ideas: let the server learn z, or let two servers work alone",
+  title:"Two ideas: reveal z, or split the work",
   cap:()=>`Functional encryption lets one server decrypt exactly w·x + b = ${R.zt}/40 and nothing else. Homomorphic secret sharing lets two servers compute on shares without talking to each other.`,
   scene(){ return svg(320,`
     <g class="c-muted"><line x1="400" y1="20" x2="400" y2="300" stroke="currentColor" stroke-dasharray="4 6"/></g>
     ${lbl(30,34,"FUNCTIONAL ENCRYPTION","font-weight=\"700\"")}
     ${box(30,60,140,70,"c-client","Client","encrypts x")}${box(240,60,140,70,"c-server","Server","holds key for w")}
-    ${box(135,190,140,70,AUC,"Key authority","issues sk_w")}
-    ${arr(174,95,236,95,"c-client","Enc(x)",205,86)}${arr(250,186,300,136,AUC,"sk_w",292,170)}
-    <g class="c-warn"><text x="310" y="152" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">learns z = ${f(R.zt/40,2)}</text></g>
+    ${box(240,200,140,70,AUC,"Key authority","issues sk_w")}
+    ${arr(174,95,236,95,"c-client","Enc(x)",205,86)}${arr(310,196,310,136,AUC,"sk_w",318,170)}
+    <g class="c-warn"><text x="252" y="118" font-size="12" font-weight="700" fill="currentColor">learns z = ${f(R.zt/40,2)}</text></g>
     ${lbl(430,34,"HOMOMORPHIC SECRET SHARING","font-weight=\"700\"")}
     ${box(430,60,140,70,"c-client","Client","shares x")}
     ${box(430,200,140,70,AUC,"Server A","local work")}${box(630,200,140,70,P1C,"Server B","local work")}
@@ -65,7 +65,7 @@ const steps=[
 { key:"Setup", who:"both", whoT:"authority", at:0.5, budget:"—", scale:"Z_p*, 41-bit p", err:()=>"exact",
   title:"Inner-product FE: master key and public key",
   cap:()=>`The authority picks three secret exponents s₁, s₂, s₃ (one per coordinate) and publishes hᵢ = g^{sᵢ} in a prime-order group.`,
-  scene(){ const row=(i,y)=>`<g class="r">${lbl(60,y,"s"+LS.sub(i+1),'font-weight="700"')}<g class="${AUC}"><text x="110" y="${y}" font-size="13" class="mono" fill="currentColor">${R.st.msk[i]}</text></g><text x="380" y="${y}" font-size="13" fill="currentColor">→</text>${lbl(420,y,"h"+LS.sub(i+1)+" = g^{s"+LS.sub(i+1)+"}",'font-weight="700"')}<g class="c-server"><text x="560" y="${y}" font-size="13" class="mono" fill="currentColor">${R.st.mpk[i]}</text></g></g>`;
+  scene(){ const row=(i,y)=>`<g class="r">${lbl(60,y,"s"+LS.sub(i+1),'font-weight="700"')}<g class="${AUC}"><text x="110" y="${y}" font-size="13" class="mono" fill="currentColor">${R.st.msk[i]}</text></g><text x="380" y="${y}" font-size="13" fill="currentColor">→</text>${lbl(420,y,"h"+LS.sub(i+1)+" = g^s"+LS.sub(i+1),'font-weight="700"')}<g class="c-server"><text x="560" y="${y}" font-size="13" class="mono" fill="currentColor">${R.st.mpk[i]}</text></g></g>`;
     return svg(260,`
       <g class="${AUC}"><text x="60" y="40" font-size="13" font-weight="700" fill="currentColor">master secret key (authority only)</text></g><g class="c-server"><text x="420" y="40" font-size="13" font-weight="700" fill="currentColor">public key (everyone)</text></g>
       ${row(0,90)}${row(1,130)}${row(2,170)}
@@ -79,9 +79,9 @@ const steps=[
   title:"The client encrypts x̃",
   cap:()=>`With one random r: ct₀ = g^r and ctᵢ = hᵢ^r · g^{x̃ᵢ}. Each ctᵢ hides x̃ᵢ behind the one-time mask hᵢ^r.`,
   scene(){ return svg(240,`
-    ${lbl(60,40,"randomness r","font-weight=\"700\"")}<g class="c-client"><text x="220" y="40" font-size="13" class="mono" fill="currentColor">${R.C.r}</text></g>
-    ${lbl(60,90,"ct₀ = g^r","font-weight=\"700\"")}<g class="c-client"><text x="220" y="90" font-size="13" class="mono" fill="currentColor">${R.C.ct0}</text></g>
-    ${R.C.ct.map((c,i)=>`<g class="r">${lbl(60,130+i*36,"ct"+LS.sub(i+1)+" = h"+LS.sub(i+1)+"^r · g^"+R.xt[i],'font-weight="700"')}<g class="c-client"><text x="260" y="${130+i*36}" font-size="13" class="mono" fill="currentColor">${c}</text></g></g>`).join("")}`,
+    ${lbl(60,40,"randomness r","font-weight=\"700\"")}<g class="c-client"><text x="300" y="40" font-size="13" class="mono" fill="currentColor">${R.C.r}</text></g>
+    ${lbl(60,90,"ct₀ = g^r","font-weight=\"700\"")}<g class="c-client"><text x="300" y="90" font-size="13" class="mono" fill="currentColor">${R.C.ct0}</text></g>
+    ${R.C.ct.map((c,i)=>`<g class="r">${lbl(60,130+i*36,"ct"+LS.sub(i+1)+" = h"+LS.sub(i+1)+"^r · g^"+R.xt[i],'font-weight="700"')}<g class="c-client"><text x="300" y="${130+i*36}" font-size="13" class="mono" fill="currentColor">${c}</text></g></g>`).join("")}`,
     "The client's ciphertext: one random element and three masked coordinates."); },
   play(){ fade(".r",0,180); },
   math:()=>`<div class="formula">ct₀ = g^r,   ctᵢ = hᵢ^r · g^{x̃ᵢ} = g^{sᵢ r + x̃ᵢ}</div><p>The message sits in the exponent, so it must be small enough to recover by a short search at the end.</p>`,
@@ -134,7 +134,7 @@ const steps=[
   cap:()=>`The client shares x between two servers. Each computes 2·x₁ − x₂ on its own shares, and server A adds the bias. Their outputs add up to <b>${R.hz}</b> = 40·z, with no communication between them.`,
   scene(){ const col=(x,cls,b,name)=>`<g class="${cls} col"><text x="${x}" y="70" font-size="14" font-weight="700" fill="currentColor">${name}</text><text x="${x}" y="104" font-size="13" class="mono" fill="currentColor">x₁ share ${h8(R.shx[0][b])}</text><text x="${x}" y="130" font-size="13" class="mono" fill="currentColor">x₂ share ${h8(R.shx[1][b])}</text><text x="${x}" y="166" font-size="13" class="mono" fill="currentColor">2·x₁ − x₂ ${b===0?"+ 4":""} = ${h8(R.out[b])}</text></g>`;
     return svg(260,`${col(60,AUC,0,"Server A")}${col(450,P1C,1,"Server B")}
-      <g class="c-client big"><rect x="250" y="196" width="300" height="44" rx="8" fill="currentColor" fill-opacity=".12" stroke="currentColor" stroke-width="2"/><text x="400" y="224" text-anchor="middle" font-size="15" class="mono" fill="currentColor">client adds outputs: ${R.hz} → ${f(R.hz/40)}</text></g>`,
+      <g class="c-client big"><rect x="200" y="196" width="400" height="44" rx="8" fill="currentColor" fill-opacity=".12" stroke="currentColor" stroke-width="2"/><text x="400" y="224" text-anchor="middle" font-size="14" class="mono" fill="currentColor">client adds outputs: ${R.hz} → ${f(R.hz/40)}</text></g>`,
       "Each server applies the linear function to its own shares; the client adds the two outputs to get 14."); },
   play(){ fade(".col",0,300); pop(".big",900); },
   math:()=>`<div class="formula">out_A + out_B = 2(x₁ᴬ + x₁ᴮ) − (x₂ᴬ + x₂ᴮ) + 4 = ${R.hz}</div>`,
@@ -142,16 +142,18 @@ const steps=[
 <p>What makes HSS different from MPC is the goal of no interaction at all between the servers, even for multiplications. Boyle, Gilboa and Ishai (CRYPTO 2016) achieved this for branching programs under DDH. Later schemes use LWE or Paillier-style assumptions. The key ingredient is the share-conversion step on the next page.</p>` },
 { key:"HSS product", who:"server", whoT:"two servers", at:1, budget:"0 server rounds", scale:"Z_p*", err:()=>R.ok?"exact":"conversion failed",
   title:"Turning multiplicative shares into additive ones without talking",
-  cap:()=>R.ok?`Server A holds g^{a+${R.m}}, server B holds g^a. Each steps forward until it hits a 'distinguished' group element. Both stop at the same one, after ${R.w0.i} and ${R.w1.i} steps: ${R.w1.i} − ${R.w0.i} = ${R.m}.`:`This time a distinguished point fell between the two starting points, so the servers stopped at different places. This happens with probability about ${R.m}/256 and is part of the scheme's error.`,
+  cap:()=>R.ok?`Server A holds g^(a+${R.m}), server B holds g^a. Each steps forward until it hits a 'distinguished' group element. Both stop at the same one, after ${R.w0.i} and ${R.w1.i} steps: ${R.w1.i} − ${R.w0.i} = ${R.m}.`:`This time a distinguished point fell between the two starting points, so the servers stopped at different places. This happens with probability about ${R.m}/256 and is part of the scheme's error.`,
   scene(){ const X0=60, X1=740, span=Math.max(R.span,1), sx=k=>X0+(k/span)*(X1-X0);
-    let g=small(40,34,"exponent offset from a (positions along g^a, g^{a+1}, g^{a+2}, …)");
+    let g=small(40,34,"positions along g^a, g^(a+1), g^(a+2), … (exponent offset from a)");
     g+=`<line x1="${X0}" y1="120" x2="${X1}" y2="120" stroke="currentColor" opacity=".35" stroke-width="2"/>`;
-    R.marks.forEach(k=>{ g+=`<g class="c-noise star"><polygon points="${sx(k)},106 ${sx(k)+4},116 ${sx(k)+14},117 ${sx(k)+6},124 ${sx(k)+9},134 ${sx(k)},128 ${sx(k)-9},134 ${sx(k)-6},124 ${sx(k)-14},117 ${sx(k)-4},116" fill="currentColor"/></g>`; });
+    R.marks.forEach(k=>{ const c=sx(k); g+=`<g class="c-noise star"><polygon points="${c},110 ${c+2.5},117 ${c+9},117.5 ${c+4},122 ${c+6},129 ${c},125 ${c-6},129 ${c-4},122 ${c-9},117.5 ${c-2.5},117" fill="currentColor"/></g>`; });
+    if(R.ok){ const c=sx(R.w1.i); g+=`<g class="c-noise"><line x1="${c}" y1="70" x2="${c}" y2="172" stroke="currentColor" stroke-dasharray="3 4"/><text x="${c}" y="206" text-anchor="middle" font-size="12" fill="currentColor">both stop here</text></g>`; }
+    g+=`<g class="c-muted"><path d="M ${sx(0)},127 v6 h ${sx(R.m)-sx(0)} v-6" fill="none" stroke="currentColor"/></g>`+small(sx(R.m)+8,140,"m = "+R.m+" apart");
     const end1=R.w1.i??0, end0=(R.w0.i??0)+R.m;
-    g+=`<g class="${P1C} walk"><circle cx="${sx(0)}" cy="160" r="7" fill="currentColor"/><line x1="${sx(0)}" y1="160" x2="${sx(end1)-4}" y2="160" stroke="currentColor" stroke-width="3" marker-end="url(#ahm)"/><text x="${sx(0)}" y="184" font-size="12.5" fill="currentColor">server B starts at g^a: ${R.w1.i} steps</text></g>`;
-    g+=`<g class="${AUC} walk"><circle cx="${sx(R.m)}" cy="80" r="7" fill="currentColor"/><line x1="${sx(R.m)}" y1="80" x2="${sx(end0)-4}" y2="80" stroke="currentColor" stroke-width="3" marker-end="url(#ahk)"/><text x="${sx(R.m)}" y="64" font-size="12.5" fill="currentColor">server A starts at g^{a+${R.m}}: ${R.w0.i} steps</text></g>`;
-    g+=`<g class="${R.ok?"c-client":"c-warn"} big"><text x="400" y="232" text-anchor="middle" font-size="15" class="mono" fill="currentColor">${R.ok?`shares: A outputs −${R.w0.i}, B outputs ${R.w1.i}; sum = ${R.w1.i-R.w0.i}`:"different stopping points: conversion failed"}</text></g>`;
-    g+=small(400,258,"stars: group elements whose SHA-256 hash starts with a zero byte (about 1 in 256)",'text-anchor="middle"');
+    g+=`<g class="${P1C} walk"><circle cx="${sx(0)}" cy="160" r="7" fill="currentColor"/><line x1="${sx(0)}" y1="160" x2="${sx(end1)-4}" y2="160" stroke="currentColor" stroke-width="3" marker-end="url(#ahm)"/><text x="${sx(0)}" y="188" font-size="12.5" fill="currentColor">server B starts at g^a: ${R.w1.i} steps</text></g>`;
+    g+=`<g class="${AUC} walk"><circle cx="${sx(R.m)}" cy="80" r="7" fill="currentColor"/><line x1="${sx(R.m)}" y1="80" x2="${sx(end0)-4}" y2="80" stroke="currentColor" stroke-width="3" marker-end="url(#ahk)"/><text x="${sx(R.m)}" y="64" font-size="12.5" fill="currentColor">server A starts at g^(a+${R.m}): ${R.w0.i} steps</text></g>`;
+    g+=`<g class="${R.ok?"c-client":"c-warn"} big"><text x="400" y="236" text-anchor="middle" font-size="15" class="mono" fill="currentColor">${R.ok?`shares: A outputs −${R.w0.i}, B outputs ${R.w1.i}; sum = ${R.w1.i-R.w0.i}`:"different stopping points: conversion failed"}</text></g>`;
+    g+=small(400,262,"stars: group elements whose SHA-256 hash starts with a zero byte (about 1 in 256)",'text-anchor="middle"');
     return svg(270,g,"Two walkers on a line of group elements start 14 apart and stop at the same distinguished point; the difference of their step counts is 14."); },
   play(){ pop(".star",0,60); LS.growX(".walk line",500,200); pop(".big",1500); },
   math:()=>`<div class="formula">h_A = g^{a+m},  h_B = g^a,  m = ${R.m}</div><div class="formula">A: ${R.w0.i} steps,  B: ${R.w1.i} steps  ⇒  i_B − i_A = ${R.w1.i!=null&&R.w0.i!=null?R.w1.i-R.w0.i:"—"}</div><p>Group: p = ${IPFE.p}. Distinguished point: first byte of SHA-256(h) is 0. Expected walk ≈ 256 steps; failure probability ≈ m/256.</p>`,
