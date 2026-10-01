@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CKKS Step by Step</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* Layout: one reading column of numbered steps; each step pairs a diagram with the live numbers it produces. Colour encodes who holds the data. */
+:root{
+  --paper:#f3f5f6; --panel:#ffffff; --ink:#16202b; --muted:#56626e; --rule:#d3dae0;
+  --client:#1d6aa3; --server:#7a46a6; --noise:#b8600c; --ok:#2b7649; --warn:#a33a2c;
+  --client-soft:#e3eef7; --server-soft:#efe7f6; --noise-soft:#f8ead9;
+  --display:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body:"Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --mono:"JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --paper:#0f151b; --panel:#151d25; --ink:#e4e9ee; --muted:#9aa7b3; --rule:#28323c;
+  --client:#6eb2e6; --server:#bb97e2; --noise:#f0a057; --ok:#7cc89b; --warn:#ee8a7c;
+  --client-soft:#16293a; --server-soft:#251c33; --noise-soft:#33240f; color-scheme:dark; } }
+:root[data-theme="dark"]{
+  --paper:#0f151b; --panel:#151d25; --ink:#e4e9ee; --muted:#9aa7b3; --rule:#28323c;
+  --client:#6eb2e6; --server:#bb97e2; --noise:#f0a057; --ok:#7cc89b; --warn:#ee8a7c;
+  --client-soft:#16293a; --server-soft:#251c33; --noise-soft:#33240f; color-scheme:dark; }
+*{box-sizing:border-box}
+html{background:var(--paper)}
+body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.6 var(--body);padding-inline:16px;padding-block:0 64px}
+.wrap{max-width:800px;margin:0 auto}
+a{color:var(--client)}
+h1,h2,h3{font-family:var(--display);font-weight:700;line-height:1.15;text-wrap:balance;margin:0}
+h1{font-size:clamp(34px,6vw,52px);letter-spacing:-.02em}
+h2{font-size:26px;letter-spacing:-.01em}
+h3{font-size:19px}
+p{margin:0}
+.mono,code{font-family:var(--mono);font-size:.86em}
+.muted{color:var(--muted)}
+.eyebrow{font:600 12px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+header.top{padding-block:40px 24px;display:grid;gap:14px}
+.lede{font-size:19px;max-width:62ch}
+.crumbs{display:flex;gap:16px;flex-wrap:wrap;font-size:14px}
+.who{display:inline-flex;align-items:center;gap:6px;font:600 12px/1 var(--mono);padding:4px 8px;border-radius:4px;letter-spacing:.04em;text-transform:uppercase}
+.who.client{background:var(--client-soft);color:var(--client)}
+.who.server{background:var(--server-soft);color:var(--server)}
+.who.both{background:var(--noise-soft);color:var(--noise)}
+.c-client{color:var(--client)} .c-server{color:var(--server)} .c-noise{color:var(--noise)} .c-ok{color:var(--ok)} .c-muted{color:var(--muted)} .c-warn{color:var(--warn)}
+section{display:grid;gap:16px;padding-block:32px;border-top:1px solid var(--rule)}
+.stephead{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;align-items:baseline}
+.stepnum{font:700 40px/1 var(--display);color:var(--muted);grid-row:span 2;min-width:48px}
+.formula{font-family:var(--mono);font-size:15px;background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:10px 14px;overflow-x:auto;white-space:nowrap}
+figure{margin:0;display:grid;gap:8px}
+figure .svgbox{background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:12px;overflow-x:auto}
+svg{display:block;width:100%;height:auto;min-width:560px;font-family:var(--body)}
+svg .mono{font-family:var(--mono)}
+figcaption{font-size:14px;color:var(--muted)}
+.nums{width:100%;border-collapse:collapse;font-size:14.5px;font-variant-numeric:tabular-nums}
+.tablebox{overflow-x:auto;background:var(--panel);border:1px solid var(--rule);border-radius:8px}
+.nums th,.nums td{text-align:left;padding:7px 12px;border-bottom:1px solid var(--rule);white-space:nowrap}
+.nums th{font:600 12px/1.2 var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.nums td.v{font-family:var(--mono)}
+.nums tr:last-child td{border-bottom:0}
+.meter{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font:13px var(--mono);color:var(--muted)}
+.meter .cell{width:40px;height:22px;border:1px solid var(--rule);border-radius:3px;display:grid;place-items:center;font-size:11px}
+.meter .cell.on{background:var(--client-soft);border-color:var(--client);color:var(--client);font-weight:600}
+.meter .cell.used{background:transparent;color:var(--muted);text-decoration:line-through}
+.note{border-left:3px solid var(--noise);padding:4px 0 4px 14px;font-size:15.5px}
+.note b{color:var(--noise)}
+.controls{display:flex;gap:12px;flex-wrap:wrap;align-items:end;background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:14px}
+.controls label{display:grid;gap:4px;font:600 12px var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.controls input{font:15px var(--mono);width:110px;padding:6px 8px;border:1px solid var(--rule);border-radius:5px;background:var(--paper);color:var(--ink)}
+button{font:600 14px var(--body);padding:8px 14px;border-radius:5px;border:1px solid var(--client);background:var(--client);color:var(--panel);cursor:pointer}
+button.ghost{background:transparent;color:var(--client)}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid var(--noise);outline-offset:2px}
+.glance{background:var(--panel);border:1px solid var(--rule);border-radius:8px;overflow:hidden}
+.glance dl{display:grid;grid-template-columns:minmax(150px,220px) 1fr;margin:0}
+.glance dt,.glance dd{margin:0;padding:10px 14px;border-bottom:1px solid var(--rule)}
+.glance dt{font:600 12px/1.4 var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.glance dl > :nth-last-child(-n+2){border-bottom:0}
+.legend{display:flex;gap:18px;flex-wrap:wrap;font-size:14px}
+.legend span::before{content:"";display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:6px;vertical-align:-1px;background:currentColor}
+.next{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.next div{border:1px solid var(--rule);border-radius:8px;padding:12px 14px;background:var(--panel);font-size:15px;min-width:0}
+.next b{font-family:var(--display)}
+.themebtn{position:fixed;top:calc(env(safe-area-inset-top,0px) + 10px);right:12px;z-index:3}
+@media (max-width:520px){ .glance dl{grid-template-columns:1fr} .glance dt{border-bottom:0;padding-bottom:0} .stepnum{font-size:30px;min-width:36px} }
+@media (prefers-reduced-motion:no-preference){ .pulse{transition:opacity .25s} }
+</style>
+</head>
+<body>
+<button class="ghost themebtn" id="theme" type="button">Theme</button>
+<div class="wrap">
+
+<header class="top">
+  <div class="crumbs"><a href="../index.html">← Schemes table</a><span class="muted">Lesson 1 of the scheme series</span></div>
+  <p class="eyebrow">Homomorphic encryption, one scheme at a time</p>
+  <h1>CKKS Step by Step</h1>
+  <p class="lede">We follow one private calculation from the user's laptop to the server and back. Every number on this page comes from a real (tiny) CKKS implementation running in your browser, so you can change the input and watch each ciphertext change.</p>
+  <div class="legend" aria-label="Colour legend">
+    <span class="c-client">Client data and secret key</span>
+    <span class="c-server">Server data and work</span>
+    <span class="c-noise">Noise and error</span>
+  </div>
+</header>
+
+<!-- ============ RUNNING EXAMPLE ============ -->
+<section id="example">
+  <div class="stephead"><span class="stepnum">0</span><p class="eyebrow">The running example, shared by every lesson</p><h2>One neuron of an LLM</h2></div>
+  <p>A user types a private prompt. After tokenization, one token becomes a tiny embedding <b class="c-client">x</b>. The server owns one neuron of the model: weights <b class="c-server">w</b> and bias <b class="c-server">b</b>. The neuron computes</p>
+  <div class="formula">y = ReLU( w₁·x₁ + w₂·x₂ + b )</div>
+  <p>This is the smallest piece of a Transformer that still has both kinds of work: a <b>linear part</b> (multiply and sum, like every matrix product in attention and the feed-forward layers) and a <b>non-linear part</b> (ReLU, standing in for GELU, SiLU and Softmax). The server must compute <b>y</b> without ever seeing <b class="c-client">x</b> or <b>y</b>.</p>
+
+  <figure>
+    <div class="svgbox">
+    <svg viewBox="0 0 720 210" role="img" aria-label="The client sends an encrypted input and public keys to the server in one message; the server computes the neuron on ciphertexts and sends back one encrypted result.">
+      <defs>
+        <marker id="ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+      </defs>
+      <g class="c-client">
+        <rect x="10" y="20" width="210" height="170" rx="8" fill="none" stroke="currentColor" stroke-width="2"/>
+        <text x="115" y="48" text-anchor="middle" font-weight="700" fill="currentColor">Client (user)</text>
+      </g>
+      <text x="30" y="82" fill="currentColor" class="mono" font-size="13">x = [<tspan id="f1x1">1.5</tspan>, <tspan id="f1x2">2.0</tspan>]</text>
+      <text x="30" y="108" fill="currentColor" class="mono c-client" font-size="13">secret key s</text>
+      <text x="30" y="150" fill="currentColor" font-size="13">decrypts y</text>
+      <text x="30" y="170" fill="currentColor" font-size="13" class="c-muted">only party that can read</text>
+      <g class="c-server">
+        <rect x="500" y="20" width="210" height="170" rx="8" fill="none" stroke="currentColor" stroke-width="2"/>
+        <text x="605" y="48" text-anchor="middle" font-weight="700" fill="currentColor">Server (model host)</text>
+      </g>
+      <text x="520" y="82" fill="currentColor" class="mono" font-size="13">w = [0.5, −0.25]</text>
+      <text x="520" y="108" fill="currentColor" class="mono" font-size="13">b = 0.1</text>
+      <text x="520" y="150" fill="currentColor" font-size="13">computes on ciphertexts</text>
+      <text x="520" y="170" fill="currentColor" font-size="13" class="c-muted">never sees x or y</text>
+      <g class="c-client"><line x1="226" y1="78" x2="494" y2="78" stroke="currentColor" stroke-width="2" marker-end="url(#ar1)"/></g>
+      <text x="360" y="68" text-anchor="middle" fill="currentColor" font-size="13">Enc(x) + public evaluation keys</text>
+      <g class="c-server"><line x1="494" y1="140" x2="226" y2="140" stroke="currentColor" stroke-width="2" marker-end="url(#ar1)"/></g>
+      <text x="360" y="130" text-anchor="middle" fill="currentColor" font-size="13">Enc(y)</text>
+      <text x="360" y="172" text-anchor="middle" fill="currentColor" font-size="12" class="c-muted">one round trip, no other interaction</text>
+    </svg>
+    </div>
+    <figcaption>The non-interactive setting of the SoK: one message in, one message out. The server works blind.</figcaption>
+  </figure>
+
+  <div class="tablebox"><table class="nums">
+    <thead><tr><th>Quantity</th><th>Owner</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td>Input x</td><td class="c-client">client</td><td class="v" id="ex-x">[1.5, 2.0]</td></tr>
+      <tr><td>Weights w, bias b</td><td class="c-server">server</td><td class="v">[0.5, −0.25], 0.1</td></tr>
+      <tr><td>z = w·x + b</td><td>nobody in clear</td><td class="v" id="ex-z">0.35</td></tr>
+      <tr><td>y = ReLU(z)</td><td class="c-client">client only</td><td class="v" id="ex-y">0.35</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="controls" role="group" aria-label="Change the example">
+    <label for="in-x1">x₁<input id="in-x1" type="number" step="0.1" value="1.5"></label>
+    <label for="in-x2">x₂<input id="in-x2" type="number" step="0.1" value="2.0"></label>
+    <button id="run" type="button">Recompute every step</button>
+    <button id="reseed" class="ghost" type="button">New random keys</button>
+    <span class="muted" style="font-size:14px;min-width:0">Defaults are the shared example. Keep |z| ≤ 1 for the ReLU step to stay accurate.</span>
+  </div>
+</section>
+
+<!-- ============ STEP 1 KEYS ============ -->
+<section id="s1">
+  <div class="stephead"><span class="stepnum">1</span><p><span class="who client">client</span></p><h2>Make keys</h2></div>
+  <p>CKKS works with polynomials. Here the ring has degree <b>N = 4</b>, so every polynomial has 4 integer coefficients, and all arithmetic wraps around with X⁴ = −1. The secret key <b class="c-client">s</b> is a polynomial with tiny coefficients in {−1, 0, 1}.</p>
+  <div class="formula">s(X) = <span id="k-s" class="c-client">…</span></div>
+  <p>The client also publishes a <b>public key</b> and two <b>evaluation keys</b> that let the server do work on ciphertexts: a <b>relinearization key</b> (needed after ciphertext × ciphertext) and a <b>rotation key</b> (needed to move values between slots). They are encryptions of s², and of s with its slots rotated, so they reveal nothing.</p>
+  <p class="note"><b>Toy sizes.</b> N = 4 is wildly insecure. Real LLM deployments use N = 65,536 and a modulus of about 1,500 bits. The algebra is identical, which is why a 4-coefficient version teaches the real thing.</p>
+</section>
+
+<!-- ============ STEP 2 ENCODE ============ -->
+<section id="s2">
+  <div class="stephead"><span class="stepnum">2</span><p><span class="who client">client</span></p><h2>Encode: numbers become a polynomial</h2></div>
+  <p>A degree-4 polynomial holds <b>N/2 = 2 slots</b>. CKKS multiplies the inputs by a scale <b>Δ = 2²⁰</b> to keep about 6 decimal digits, then finds the polynomial whose values at two special complex points are exactly those slots. Every later operation on the polynomial acts on <i>both slots at once</i>: this is SIMD packing, the reason CKKS suits large matrix products.</p>
+  <figure>
+    <div class="svgbox">
+    <svg viewBox="0 0 720 170" role="img" aria-label="Two slot values are scaled by delta and turned into four integer polynomial coefficients.">
+      <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+      <text x="20" y="28" font-size="12" fill="currentColor" class="c-muted">SLOTS (what you think in)</text>
+      <g class="c-client">
+        <rect x="20" y="40" width="90" height="50" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <rect x="118" y="40" width="90" height="50" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <text x="65" y="71" text-anchor="middle" class="mono" font-size="15" fill="currentColor" id="f2s1">1.5</text>
+        <text x="163" y="71" text-anchor="middle" class="mono" font-size="15" fill="currentColor" id="f2s2">2.0</text>
+      </g>
+      <text x="65" y="110" text-anchor="middle" font-size="12" fill="currentColor" class="c-muted">slot 1</text>
+      <text x="163" y="110" text-anchor="middle" font-size="12" fill="currentColor" class="c-muted">slot 2</text>
+      <line x1="220" y1="65" x2="330" y2="65" stroke="currentColor" stroke-width="2" marker-end="url(#ar2)"/>
+      <text x="275" y="52" text-anchor="middle" font-size="12" fill="currentColor">× Δ, then</text>
+      <text x="275" y="86" text-anchor="middle" font-size="12" fill="currentColor">inverse embedding</text>
+      <text x="345" y="28" font-size="12" fill="currentColor" class="c-muted">POLYNOMIAL m(X) = m₀ + m₁X + m₂X² + m₃X³ (what gets encrypted)</text>
+      <g class="c-client">
+        <rect x="345" y="40" width="88" height="50" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <rect x="439" y="40" width="88" height="50" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <rect x="533" y="40" width="88" height="50" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <rect x="627" y="40" width="88" height="50" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <text x="389" y="71" text-anchor="middle" class="mono" font-size="13" fill="currentColor" id="f2m0">…</text>
+        <text x="483" y="71" text-anchor="middle" class="mono" font-size="13" fill="currentColor" id="f2m1">…</text>
+        <text x="577" y="71" text-anchor="middle" class="mono" font-size="13" fill="currentColor" id="f2m2">…</text>
+        <text x="671" y="71" text-anchor="middle" class="mono" font-size="13" fill="currentColor" id="f2m3">…</text>
+      </g>
+      <text x="389" y="110" text-anchor="middle" font-size="12" fill="currentColor" class="c-muted">m₀</text>
+      <text x="483" y="110" text-anchor="middle" font-size="12" fill="currentColor" class="c-muted">m₁</text>
+      <text x="577" y="110" text-anchor="middle" font-size="12" fill="currentColor" class="c-muted">m₂</text>
+      <text x="671" y="110" text-anchor="middle" font-size="12" fill="currentColor" class="c-muted">m₃</text>
+      <text x="20" y="150" font-size="12.5" fill="currentColor">Check: evaluating m(X) at the two special points and dividing by Δ gives back <tspan class="mono" id="f2chk">…</tspan></text>
+    </svg>
+    </div>
+    <figcaption>Encoding is not encryption. It only turns real numbers into the integer polynomial the scheme can encrypt. The rounding to integers is the first, tiny, source of error.</figcaption>
+  </figure>
+</section>
+
+<!-- ============ STEP 3 ENCRYPT ============ -->
+<section id="s3">
+  <div class="stephead"><span class="stepnum">3</span><p><span class="who client">client</span></p><h2>Encrypt: hide the polynomial under noise</h2></div>
+  <p>A ciphertext is a <b>pair of polynomials (c₀, c₁)</b> with huge coefficients modulo q. It is built so that one simple combination with the secret key gives back the message plus a small random error <b class="c-noise">e</b>:</p>
+  <div class="formula">c₀ + c₁ · s  ≡  Δ·m + <span class="c-noise">e</span>   (mod q)</div>
+  <div class="tablebox"><table class="nums">
+    <thead><tr><th>Polynomial</th><th>Coefficients (hex, mod q = 2⁹⁰)</th></tr></thead>
+    <tbody>
+      <tr><td>c₀</td><td class="v" id="ct-c0">…</td></tr>
+      <tr><td>c₁</td><td class="v" id="ct-c1">…</td></tr>
+      <tr><td>c₀ + c₁·s</td><td class="v" id="ct-dec">…</td></tr>
+      <tr><td class="c-noise">error e</td><td class="v c-noise" id="ct-err">…</td></tr>
+    </tbody>
+  </table></div>
+  <p>Without <b class="c-client">s</b>, c₀ and c₁ look like uniformly random 90-bit numbers. This is the Ring-LWE problem, believed hard even for quantum computers. With <b class="c-client">s</b>, the client recovers the message up to an error of a few units. The figure shows where message and noise sit inside one coefficient.</p>
+  <figure>
+    <div class="svgbox">
+    <svg viewBox="0 0 720 150" role="img" aria-label="Inside one decrypted coefficient the noise sits in the lowest bits, the scaled message above it, and the remaining high bits are headroom for future multiplications.">
+      <text x="20" y="24" font-size="12" fill="currentColor" class="c-muted">ONE DECRYPTED COEFFICIENT, 90 BITS (bit 89 on the left, bit 0 on the right)</text>
+      <rect x="20" y="40" width="680" height="44" rx="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <rect x="20" y="40" width="453" height="44" rx="4" fill="currentColor" opacity="0.06"/>
+      <g class="c-client"><rect x="473" y="40" width="204" height="44" fill="currentColor" opacity="0.25"/></g>
+      <g class="c-noise"><rect x="677" y="40" width="23" height="44" fill="currentColor" opacity="0.55"/></g>
+      <line x1="473" y1="36" x2="473" y2="88" stroke="currentColor" stroke-dasharray="3 3"/>
+      <text x="246" y="67" text-anchor="middle" font-size="13" fill="currentColor">headroom: 3 levels × 20 bits for future rescaling</text>
+      <text x="575" y="67" text-anchor="middle" font-size="13" fill="currentColor" class="c-client">Δ·m  (≈ 21 bits)</text>
+      <text x="688" y="108" text-anchor="middle" font-size="12" fill="currentColor" class="c-noise">e</text>
+      <text x="20" y="108" font-size="12" fill="currentColor" class="c-muted">bit 89</text>
+      <text x="473" y="108" text-anchor="middle" font-size="12" fill="currentColor" class="c-muted">bit 30</text>
+      <text x="640" y="108" text-anchor="end" font-size="12" fill="currentColor" class="c-muted">bit 0</text>
+      <text x="20" y="136" font-size="12.5" fill="currentColor">Decoding divides by Δ, so the noise lands in digit 6 or 7 after the decimal point.</text>
+    </svg>
+    </div>
+    <figcaption>In CKKS the noise is not removed. It simply sits below the precision you care about. This is what “approximate” means.</figcaption>
+  </figure>
+  <div class="meter" aria-label="Levels remaining"><span>Levels left</span><span class="cell on">L3</span><span class="cell on">L2</span><span class="cell on">L1</span><span class="cell on">L0</span><span>, nothing used yet</span></div>
+</section>
+
+<!-- ============ STEP 4 MULTIPLY BY WEIGHTS ============ -->
+<section id="s4">
+  <div class="stephead"><span class="stepnum">4</span><p><span class="who server">server</span></p><h2>Multiply by the weights, then rescale</h2></div>
+  <p>The server encodes its own weights w = [0.5, −0.25] the same way (they stay unencrypted) and multiplies both ciphertext polynomials by them. Because encoding respects multiplication, both slots are multiplied <i>at once</i>: slot-wise <b>x ⊙ w</b>.</p>
+  <div class="formula">(c₀, c₁) × w  →  decrypts to  Δ²·(x ⊙ w) + small error</div>
+  <p>The scale is now Δ², 40 bits. <b>Rescaling</b> divides the whole ciphertext by Δ to bring the scale back to Δ. That throws away 20 bits of the modulus. This is one <b>level</b>, and the budget is finite.</p>
+  <div class="tablebox"><table class="nums">
+    <thead><tr><th>After</th><th>Slot 1</th><th>Slot 2</th><th>Exact</th><th>Error</th></tr></thead>
+    <tbody id="t4"></tbody>
+  </table></div>
+  <div class="meter"><span>Levels left</span><span class="cell used">L3</span><span class="cell on">L2</span><span class="cell on">L1</span><span class="cell on">L0</span><span>, one multiplication spent</span></div>
+</section>
+
+<!-- ============ STEP 5 ROTATE AND ADD ============ -->
+<section id="s5">
+  <div class="stephead"><span class="stepnum">5</span><p><span class="who server">server</span></p><h2>Rotate and add: the sum w₁x₁ + w₂x₂</h2></div>
+  <p>The two products sit in different slots, and CKKS can only add slot 1 to slot 1. To sum them, the server <b>rotates</b> a copy so the slots swap places. Rotation substitutes X → X⁵ in both polynomials, which secretly changes the key, then <b>key switching</b> with the rotation key brings it back under <b class="c-client">s</b>. Adding the copy gives the dot product in every slot.</p>
+  <figure>
+    <div class="svgbox">
+    <svg viewBox="0 0 720 230" role="img" aria-label="The products in slot one and slot two are rotated so they swap, then added, giving the same sum in both slots.">
+      <defs><marker id="ar5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+      <g class="c-server">
+        <rect x="140" y="20" width="110" height="44" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <rect x="258" y="20" width="110" height="44" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <rect x="140" y="100" width="110" height="44" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <rect x="258" y="100" width="110" height="44" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <rect x="140" y="172" width="110" height="44" rx="5" fill="currentColor" opacity="0.12" stroke="currentColor" stroke-width="2"/>
+        <rect x="258" y="172" width="110" height="44" rx="5" fill="currentColor" opacity="0.12" stroke="currentColor" stroke-width="2"/>
+      </g>
+      <text x="20" y="47" font-size="13" fill="currentColor">ct  (x ⊙ w)</text>
+      <text x="20" y="127" font-size="13" fill="currentColor">rotate(ct)</text>
+      <text x="20" y="199" font-size="13" fill="currentColor" font-weight="700">ct + rotate(ct)</text>
+      <text x="195" y="47" text-anchor="middle" class="mono" font-size="14" fill="currentColor" id="f5a1">…</text>
+      <text x="313" y="47" text-anchor="middle" class="mono" font-size="14" fill="currentColor" id="f5a2">…</text>
+      <text x="195" y="127" text-anchor="middle" class="mono" font-size="14" fill="currentColor" id="f5b1">…</text>
+      <text x="313" y="127" text-anchor="middle" class="mono" font-size="14" fill="currentColor" id="f5b2">…</text>
+      <text x="195" y="199" text-anchor="middle" class="mono" font-size="14" fill="currentColor" id="f5c1">…</text>
+      <text x="313" y="199" text-anchor="middle" class="mono" font-size="14" fill="currentColor" id="f5c2">…</text>
+      <line x1="200" y1="66" x2="305" y2="98" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar5)"/>
+      <line x1="308" y1="66" x2="203" y2="98" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar5)"/>
+      <text x="390" y="78" font-size="13" fill="currentColor">X → X⁵ swaps the slots</text>
+      <text x="390" y="96" font-size="13" fill="currentColor" class="c-muted">+ key switch with the rotation key</text>
+      <text x="390" y="190" font-size="13" fill="currentColor">slot-wise addition: no level used,</text>
+      <text x="390" y="208" font-size="13" fill="currentColor" class="c-muted">but rotation is expensive in practice</text>
+    </svg>
+    </div>
+    <figcaption>In a real LLM a 4096-wide dot product needs log₂ 4096 = 12 rotate-and-add rounds. Rotations and their keys are a main cost the SoK's packing layouts try to reduce.</figcaption>
+  </figure>
+  <p>Finally the server adds the bias b = 0.1, encoded at the current scale. Addition is cheap and uses no level.</p>
+  <div class="tablebox"><table class="nums">
+    <thead><tr><th>After</th><th>Slot 1</th><th>Slot 2</th><th>Exact</th><th>Error</th></tr></thead>
+    <tbody id="t5"></tbody>
+  </table></div>
+  <div class="meter"><span>Levels left</span><span class="cell used">L3</span><span class="cell on">L2</span><span class="cell on">L1</span><span class="cell on">L0</span><span>, rotation and addition are level-free</span></div>
+</section>
+
+<!-- ============ STEP 6 RELU ============ -->
+<section id="s6">
+  <div class="stephead"><span class="stepnum">6</span><p><span class="who server">server</span></p><h2>ReLU: replace it with a polynomial</h2></div>
+  <p>CKKS can only add and multiply. ReLU(z) = max(0, z) is neither, so the server evaluates a polynomial that <i>looks like</i> ReLU on a chosen interval. Here we use the best degree-2 fit on [−1, 1]:</p>
+  <div class="formula">ReLU(z) ≈ p(z) = 0.09375 + 0.5·z + 0.46875·z²</div>
+  <figure>
+    <div class="svgbox">
+    <svg viewBox="0 0 720 300" role="img" aria-label="ReLU and its degree-two polynomial approximation on the interval from minus one to one; the current input z is marked on both curves.">
+      <g id="plot"></g>
+    </svg>
+    </div>
+    <figcaption>Outside the shaded interval the polynomial is wrong. Choosing the interval and the degree is a trade-off between accuracy and depth, a central theme of the SoK.</figcaption>
+  </figure>
+  <p>Evaluating p(z) takes two multiplications in a row. <b>z · z</b> multiplies two ciphertexts, which produces a third polynomial. <b>Relinearization</b> with the relinearization key folds it back into a pair. Then comes the multiplication by 0.46875. Each one costs a rescale, so the ciphertext ends at the bottom level.</p>
+  <div class="tablebox"><table class="nums">
+    <thead><tr><th>After</th><th>Level</th><th>Slot 1</th><th>Exact</th><th>Error</th></tr></thead>
+    <tbody id="t6"></tbody>
+  </table></div>
+  <div class="meter"><span>Levels left</span><span class="cell used">L3</span><span class="cell used">L2</span><span class="cell used">L1</span><span class="cell on">L0</span><span>, no multiplications left</span></div>
+  <p class="note"><b>Out of levels.</b> One more layer would need <b>bootstrapping</b>: homomorphically re-running decryption to refill the modulus. In real CKKS LLM inference, bootstrapping takes 50–75% of the total time (SoK, §4.2.1).</p>
+</section>
+
+<!-- ============ STEP 7 DECRYPT ============ -->
+<section id="s7">
+  <div class="stephead"><span class="stepnum">7</span><p><span class="who client">client</span></p><h2>Decrypt and decode</h2></div>
+  <p>The server sends the final ciphertext back. The client computes c₀ + c₁·s, divides by Δ and reads the slot.</p>
+  <div class="tablebox"><table class="nums">
+    <thead><tr><th>Value</th><th>Number</th><th>Where the difference comes from</th></tr></thead>
+    <tbody>
+      <tr><td>True answer ReLU(z)</td><td class="v" id="r-true">…</td><td class="muted">plain arithmetic</td></tr>
+      <tr><td>Polynomial answer p(z)</td><td class="v" id="r-poly">…</td><td class="c-warn" id="r-polyerr">…</td></tr>
+      <tr><td>What the client decrypts</td><td class="v c-client" id="r-dec">…</td><td class="c-noise" id="r-noise">…</td></tr>
+    </tbody>
+  </table></div>
+  <p>Two very different errors appear. The <b class="c-noise">encryption noise</b> is tiny, around one millionth, and controlled by Δ. The <b class="c-warn">approximation error</b> is much larger and comes from replacing ReLU with a polynomial. In CKKS, getting the non-linear layers right matters more for accuracy than the encryption itself.</p>
+</section>
+
+<!-- ============ GLANCE CARD ============ -->
+<section id="glance">
+  <div class="stephead"><span class="stepnum">≡</span><p class="eyebrow">Comparison card, the same fields in every lesson</p><h2>CKKS at a glance</h2></div>
+  <div class="glance"><dl>
+    <dt>A slot holds</dt><dd>An approximate real (or complex) number, scaled by Δ</dd>
+    <dt>Values per ciphertext</dt><dd>N/2 (here 2, in practice 32,768)</dd>
+    <dt>Native operations</dt><dd>Add, multiply, rotate slots</dd>
+    <dt>Linear part w·x + b</dt><dd>Plaintext × ciphertext multiply, rotate-and-add, add bias. Cheap per value thanks to packing.</dd>
+    <dt>Non-linear part ReLU</dt><dd>Polynomial approximation on a fixed interval. Inexact, and deep for high accuracy.</dd>
+    <dt>Noise</dt><dd>Never removed. It stays below the chosen precision and grows a little with each operation.</dd>
+    <dt>Depth used here</dt><dd>3 levels: weights, z², coefficient</dd>
+    <dt>Refreshing</dt><dd>Bootstrapping, the most expensive operation</dd>
+    <dt>Result for our neuron</dt><dd><span class="mono" id="g-res">…</span></dd>
+    <dt>Hardness assumption</dt><dd>Ring Learning With Errors (post-quantum)</dd>
+  </dl></div>
+  <p class="eyebrow" style="margin-top:8px">Coming next with the same neuron</p>
+  <div class="next">
+    <div><b>BFV / BGV</b><br>Exact integers. We scale x by 10 and get z exactly, but ReLU is even harder.</div>
+    <div><b>TFHE</b><br>One number per ciphertext, but ReLU is computed <i>exactly</i> by a lookup table during bootstrapping.</div>
+    <div><b>Paillier</b><br>Only additions. The linear part works, ReLU is impossible without help.</div>
+    <div><b>Gentry–Lee</b><br>Encrypts the whole matrix, so the rotate-and-add of step 5 disappears.</div>
+  </div>
+</section>
+
+<p class="muted" style="font-size:14px;padding-block:24px 0">Toy parameters: N = 4, Δ = 2²⁰, q = 2⁹⁰ (levels at 2³⁰, 2⁵⁰, 2⁷⁰, 2⁹⁰), key-switching modulus P = 2¹⁰⁰, ternary secret, small error in [−2, 2]. Real CKKS uses prime moduli in RNS form and N ≥ 2¹⁵. Source scheme: Cheon, Kim, Kim, Song, <a href="https://eprint.iacr.org/2016/421">ASIACRYPT 2017</a>.</p>
+</div>
+
+<script>
+(function(){
+"use strict";
+const N=4, DB=20n, D=1n<<DB, P=1n<<100n, L=3;
+const q=[30n,50n,70n,90n].map(b=>1n<<b);
+const W=[0.5,-0.25], B=0.1, C0=0.09375, C1=0.5, C2=0.46875;
+let seed=20261001;
+const $=id=>document.getElementById(id);
+function rng(){ seed|=0; seed=seed+0x6D2B79F5|0; let t=Math.imul(seed^seed>>>15,1|seed); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }
+function randBig(mod){ let x=0n; for(let i=0;i<5;i++) x=(x<<32n)|BigInt(Math.floor(rng()*4294967296)); return x%mod; }
+const tern=()=>BigInt(Math.floor(rng()*3)-1);
+const err=()=>BigInt(Math.round((rng()+rng()+rng()-1.5)*1.3));
+const cmod=(x,m)=>{ x%=m; if(x<0n)x+=m; if(x>m/2n)x-=m; return x; };
+const fdiv=(x,d)=>{ let r=x/d; if((x%d!==0n)&&((x<0n)!==(d<0n))) r-=1n; return r; };
+const rdiv=(x,d)=>fdiv(x+d/2n,d);
+const red=(a,m)=>a.map(v=>cmod(v,m));
+const padd=(a,b,m)=>red(a.map((v,i)=>v+b[i]),m);
+const pneg=a=>a.map(v=>-v);
+function pmul(a,b,m){ const c=[0n,0n,0n,0n]; for(let i=0;i<N;i++)for(let j=0;j<N;j++){ const k=i+j; if(k<N)c[k]+=a[i]*b[j]; else c[k-N]-=a[i]*b[j]; } return red(c,m); }
+function auto5(a){ const c=[0n,0n,0n,0n]; for(let k=0;k<N;k++){ let e=(5*k)%(2*N); if(e<N)c[e]+=a[k]; else c[e-N]-=a[k]; } return c; }
+// canonical embedding for N=4: slots at zeta^1 and zeta^5, conjugates at zeta^7, zeta^3
+const ang=[1,5,7,3].map(k=>k*Math.PI/4);
+function encode(z,scale){ const v=[[z[0],0],[z[1],0],[z[0],0],[z[1],0]]; const m=[];
+  for(let k=0;k<N;k++){ let re=0; for(let j=0;j<N;j++){ const a=-ang[j]*k; re+=v[j][0]*Math.cos(a)-v[j][1]*Math.sin(a); } m.push(BigInt(Math.round(re/N*Number(scale)))); } return m; }
+function decode(m,scale){ const out=[]; for(let j=0;j<2;j++){ let re=0; for(let k=0;k<N;k++) re+=Number(m[k])*Math.cos(ang[j]*k); out.push(re/Number(scale)); } return out; }
+let K;
+function keygen(){
+  let s; do{ s=[tern(),tern(),tern(),tern()]; }while(s.every(v=>v===0n));
+  const Q=q[L], a=[0,1,2,3].map(()=>randBig(Q)), e=[0,1,2,3].map(err);
+  const pk0=padd(pneg(pmul(a,s,Q)),e,Q);
+  const PQ=P*Q;
+  function swk(sp){ const a2=[0,1,2,3].map(()=>randBig(PQ)), e2=[0,1,2,3].map(err);
+    return [red(pneg(pmul(a2,s,PQ)).map((v,i)=>v+e2[i]+P*sp[i]),PQ), a2]; }
+  K={s, pk:[pk0,a], rlk:swk(pmul(s,s,PQ)), rot:swk(auto5(s))};
+}
+function encrypt(m){ const Q=q[L], u=[0,1,2,3].map(tern), e0=[0,1,2,3].map(err), e1=[0,1,2,3].map(err);
+  return {c:[padd(padd(pmul(K.pk[0],u,Q),e0,Q),m,Q), padd(pmul(K.pk[1],u,Q),e1,Q)], l:L}; }
+const decRaw=ct=>padd(ct.c[0],pmul(ct.c[1],K.s,q[ct.l]),q[ct.l]);
+function ks(d,key,l){ const m=P*q[l]; const dd=red(d,q[l]); const t0=pmul(dd,red(key[0],m),m), t1=pmul(dd,red(key[1],m),m);
+  return [red(t0.map(v=>rdiv(v,P)),q[l]), red(t1.map(v=>rdiv(v,P)),q[l])]; }
+const rescale=ct=>({c:ct.c.map(p=>red(red(p,q[ct.l]).map(v=>rdiv(v,D)),q[ct.l-1])), l:ct.l-1});
+const mulPt=(ct,pt)=>({c:ct.c.map(p=>pmul(p,pt,q[ct.l])), l:ct.l});
+const addPt=(ct,pt)=>({c:[padd(ct.c[0],pt,q[ct.l]),ct.c[1]], l:ct.l});
+const add=(a,b)=>({c:[padd(a.c[0],b.c[0],q[a.l]),padd(a.c[1],b.c[1],q[a.l])], l:a.l});
+const down=ct=>({c:ct.c.map(p=>red(p,q[ct.l-1])), l:ct.l-1});
+function mulCt(a,b){ const m=q[a.l]; const d0=pmul(a.c[0],b.c[0],m), d1=padd(pmul(a.c[0],b.c[1],m),pmul(a.c[1],b.c[0],m),m), d2=pmul(a.c[1],b.c[1],m);
+  const r=ks(d2,K.rlk,a.l); return {c:[padd(d0,r[0],m),padd(d1,r[1],m)], l:a.l}; }
+function rotate(ct){ const m=q[ct.l]; const a0=auto5(ct.c[0]), a1=auto5(ct.c[1]); const r=ks(a1,K.rot,ct.l); return {c:[padd(a0,r[0],m),r[1]], l:ct.l}; }
+const val=(ct,scale)=>decode(decRaw(ct),scale||D);
+const f=(x,d=6)=>{ if(Math.abs(x)<5e-13) x=0; return (x>=0?" ":"")+x.toFixed(d).replace("-","−"); };
+const fe=x=>{ const a=Math.abs(x); if(a===0) return "0"; const e=Math.floor(Math.log10(a)); return (a/10**e).toFixed(1)+"×10"+String(e).replace("-","⁻").replace(/\d/g,c=>"⁰¹²³⁴⁵⁶⁷⁸⁹"[c]); };
+const hex=(v,m)=>{ let u=((v%m)+m)%m; const h=u.toString(16).padStart(23,"0"); return h.slice(0,5)+"…"+h.slice(-4); };
+const polyStr=p=>{ const t=[]; p.forEach((c,i)=>{ if(c===0n) return; const s=c<0n?"− ":"+ "; const a=(c<0n?-c:c); const mono=i===0?"":i===1?"X":"X"+"²³"[i-2]; t.push(s+(a===1n&&i>0?"":a.toString())+mono); }); if(!t.length) return "0"; let r=t.join(" "); return r.startsWith("+ ")?r.slice(2):r.replace(/^− /,"−"); };
+function row(label,v,exact,cols){ const e=Math.max(...v.map((x,i)=>Math.abs(x-exact[i]))); return `<tr><td>${label}</td>${cols?cols:""}<td class="v">${f(v[0])}</td>${v.length>1?`<td class="v">${f(v[1])}</td>`:""}<td class="v">${f(exact[0],4)}${v.length>1&&exact[1]!==exact[0]?" / "+f(exact[1],4):""}</td><td class="v c-noise">${fe(e)}</td></tr>`; }
+
+function run(){
+  const x1=parseFloat($("in-x1").value), x2=parseFloat($("in-x2").value);
+  if(!isFinite(x1)||!isFinite(x2)) return;
+  const x=[x1,x2];
+  const prod=[x1*W[0],x2*W[1]], z=prod[0]+prod[1]+B, relu=Math.max(0,z), poly=C0+C1*z+C2*z*z;
+  // example table + figure 1
+  $("ex-x").textContent=`[${x1}, ${x2}]`; $("ex-z").textContent=+z.toFixed(6); $("ex-y").textContent=+relu.toFixed(6);
+  $("f1x1").textContent=x1; $("f1x2").textContent=x2;
+  // step 1
+  $("k-s").textContent=polyStr(K.s);
+  // step 2
+  const m=encode(x,D);
+  ["f2m0","f2m1","f2m2","f2m3"].forEach((id,i)=>$(id).textContent=m[i].toString().replace("-","−"));
+  $("f2s1").textContent=x1; $("f2s2").textContent=x2;
+  const back=decode(m,D); $("f2chk").textContent=`[${back.map(v=>v.toFixed(6)).join(", ")}]`;
+  // step 3
+  const ct=encrypt(m), dm=decRaw(ct);
+  $("ct-c0").textContent=ct.c[0].map(v=>hex(v,q[3])).join("   ");
+  $("ct-c1").textContent=ct.c[1].map(v=>hex(v,q[3])).join("   ");
+  $("ct-dec").textContent=dm.map(v=>v.toString().replace("-","−")).join(",  ");
+  $("ct-err").textContent=dm.map((v,i)=>(v-m[i]).toString().replace("-","−")).join(",  ");
+  // step 4
+  const ptw=encode(W,D);
+  const c4a=mulPt(ct,ptw), c4=rescale(c4a);
+  $("t4").innerHTML=row("× w   (scale Δ², level 3)",val(c4a,D*D),prod)+row("rescale (scale Δ, level 2)",val(c4),prod);
+  // step 5
+  const c5r=rotate(c4), c5=add(c4,c5r), dot=prod[0]+prod[1];
+  const ptb=encode([B,B],D), c5b=addPt(c5,ptb);
+  const v4=val(c4), vr=val(c5r), v5=val(c5);
+  $("f5a1").textContent=f(v4[0],4); $("f5a2").textContent=f(v4[1],4);
+  $("f5b1").textContent=f(vr[0],4); $("f5b2").textContent=f(vr[1],4);
+  $("f5c1").textContent=f(v5[0],4); $("f5c2").textContent=f(v5[1],4);
+  $("t5").innerHTML=row("rotate(ct)",vr,[prod[1],prod[0]])+row("ct + rotate(ct)",v5,[dot,dot])+row("+ b   →  z",val(c5b),[z,z]);
+  // step 6
+  const zz=rescale(mulCt(c5b,c5b));                       // level 1, z^2
+  const t=rescale(mulPt(zz,[BigInt(Math.round(C2*Number(D))),0n,0n,0n]));   // level 0, c2 z^2
+  const u=down(rescale(mulPt(c5b,[BigInt(Math.round(C1*Number(D))),0n,0n,0n]))); // level 0, c1 z
+  const y=addPt(add(t,u),[BigInt(Math.round(C0*Number(D))),0n,0n,0n]);
+  const lv=(label,ct,ex)=>{ const v=val(ct); return `<tr><td>${label}</td><td class="v">L${ct.l}</td><td class="v">${f(v[0])}</td><td class="v">${f(ex,6)}</td><td class="v c-noise">${fe(Math.abs(v[0]-ex))}</td></tr>`; };
+  $("t6").innerHTML=lv("z · z, relinearize, rescale",zz,z*z)+lv("× 0.46875, rescale",t,C2*z*z)+lv("0.5·z (rescaled, dropped to L0)",u,C1*z)+lv("sum + 0.09375  →  p(z)",y,poly);
+  // step 7
+  const yd=val(y)[0];
+  $("r-true").textContent=f(relu); $("r-poly").textContent=f(poly); $("r-dec").textContent=f(yd);
+  $("r-polyerr").textContent=`approximation error ${fe(Math.abs(poly-relu))} (ReLU replaced by p)`;
+  $("r-noise").textContent=`encryption noise ${fe(Math.abs(yd-poly))}`;
+  $("g-res").textContent=`${f(yd,4).trim()} instead of ${f(relu,4).trim()}, mostly approximation error`;
+  drawPlot(z);
+}
+
+function drawPlot(z){
+  const X0=60,X1=700,Y0=260,Y1=20, xmin=-1.5,xmax=1.5,ymin=-0.2,ymax=1.6;
+  const sx=v=>X0+(v-xmin)/(xmax-xmin)*(X1-X0), sy=v=>Y0-(v-ymin)/(ymax-ymin)*(Y0-Y1);
+  const path=fn=>{ let d=""; for(let i=0;i<=120;i++){ const v=xmin+(xmax-xmin)*i/120; const w=Math.min(ymax,Math.max(ymin,fn(v))); d+=(i?"L":"M")+sx(v).toFixed(1)+","+sy(w).toFixed(1); } return d; };
+  const p=v=>C0+C1*v+C2*v*v;
+  let g=`<rect x="${sx(-1)}" y="${Y1}" width="${sx(1)-sx(-1)}" height="${Y0-Y1}" fill="currentColor" opacity="0.05"/>`;
+  g+=`<text x="${(sx(-1)+sx(1))/2}" y="${Y1+16}" text-anchor="middle" font-size="12" fill="currentColor" class="c-muted">approximation interval [−1, 1]</text>`;
+  g+=`<line x1="${X0}" y1="${sy(0)}" x2="${X1}" y2="${sy(0)}" stroke="currentColor" opacity="0.4"/><line x1="${sx(0)}" y1="${Y1}" x2="${sx(0)}" y2="${Y0}" stroke="currentColor" opacity="0.4"/>`;
+  [-1.5,-1,-0.5,0.5,1,1.5].forEach(t=>{ g+=`<text x="${sx(t)}" y="${sy(0)+16}" text-anchor="middle" font-size="11" fill="currentColor" class="c-muted mono">${String(t).replace("-","−")}</text>`; });
+  [0.5,1,1.5].forEach(t=>{ g+=`<text x="${sx(0)-6}" y="${sy(t)+4}" text-anchor="end" font-size="11" fill="currentColor" class="c-muted mono">${t}</text>`; });
+  g+=`<g class="c-ok"><path d="${path(v=>Math.max(0,v))}" fill="none" stroke="currentColor" stroke-width="2.5"/><text x="${sx(1.42)}" y="${sy(1.42)-10}" text-anchor="end" font-size="13" fill="currentColor">ReLU(z)</text></g>`;
+  g+=`<g class="c-server"><path d="${path(p)}" fill="none" stroke="currentColor" stroke-width="2.5" stroke-dasharray="7 5"/><text x="${sx(-1.25)}" y="${sy(Math.min(1.5,p(-1.25)))-8}" font-size="13" fill="currentColor">p(z), degree 2</text></g>`;
+  const zc=Math.min(xmax,Math.max(xmin,z));
+  g+=`<line x1="${sx(zc)}" y1="${sy(Math.max(0,zc))}" x2="${sx(zc)}" y2="${sy(Math.min(ymax,p(zc)))}" class="c-warn" stroke="currentColor" stroke-width="2"/>`;
+  g+=`<g class="c-ok"><circle cx="${sx(zc)}" cy="${sy(Math.max(0,zc))}" r="5" fill="currentColor"/></g><g class="c-server"><circle cx="${sx(zc)}" cy="${sy(Math.min(ymax,p(zc)))}" r="5" fill="currentColor"/></g>`;
+  g+=`<text x="${sx(zc)+10}" y="${sy((Math.max(0,zc)+Math.min(ymax,p(zc)))/2)+4}" font-size="12" fill="currentColor" class="c-warn">z = ${(+z.toFixed(3)).toString().replace("-","−")}: gap ${Math.abs(p(z)-Math.max(0,z)).toFixed(3)}</text>`;
+  if(Math.abs(z)>1) g+=`<text x="${X1}" y="${Y0-8}" text-anchor="end" font-size="13" fill="currentColor" class="c-warn">z is outside the interval: the result will be badly wrong</text>`;
+  $("plot").innerHTML=g;
+}
+keygen(); run();
+$("run").addEventListener("click",run);
+["in-x1","in-x2"].forEach(id=>$(id).addEventListener("change",run));
+$("reseed").addEventListener("click",()=>{ seed=Math.floor(Math.random()*1e9); keygen(); run(); });
+$("theme").addEventListener("click",()=>{ const r=document.documentElement; const d=r.dataset.theme?r.dataset.theme==="dark":matchMedia("(prefers-color-scheme: dark)").matches; r.dataset.theme=d?"light":"dark"; });
+})();
+</script>
+</body>
+</html>
