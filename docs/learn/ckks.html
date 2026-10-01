@@ -64,6 +64,11 @@ button{font:600 14px var(--body);padding:8px 14px;border-radius:6px;border:1px s
 button.ghost{background:transparent;color:var(--client)}
 button:disabled{opacity:.4;cursor:default}
 button:focus-visible,.chip:focus-visible,summary:focus-visible,input:focus-visible{outline:2px solid var(--noise);outline-offset:2px}
+details.explain{margin:0 20px 16px;border-top:1px dashed var(--rule)}
+details.explain summary{cursor:pointer;padding:10px 0 4px;font-weight:700;color:var(--client)}
+.explainbody{display:grid;gap:10px;padding:6px 0 4px;max-width:70ch;font-size:16.5px}
+.explainbody h3{font:700 15px var(--display);margin:6px 0 0}
+.explainbody ul{margin:0;padding-left:20px;display:grid;gap:4px}
 /* status strip */
 .status{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
 .stat{background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:10px 12px;display:grid;gap:6px;min-width:0}
@@ -114,6 +119,7 @@ footer{font-size:13px;color:var(--muted)}
   <div class="stagehead"><h2 id="st-title">…</h2><span class="who" id="st-who">…</span></div>
   <div class="scene" id="scene"></div>
   <p class="caption" id="st-cap">…</p>
+  <details class="explain" id="explain"><summary>Read the full explanation</summary><div class="explainbody" id="explainbody"></div></details>
   <div class="nav">
     <div class="grp"><button class="ghost" id="prev" type="button">← Back</button><button id="next" type="button">Next →</button></div>
     <div class="grp"><button class="ghost" id="replay" type="button">↻ Replay</button><button class="ghost" id="play" type="button">▶ Auto-play</button></div>
@@ -206,7 +212,8 @@ const draw=(sel,t,d)=>A(sel,[{strokeDashoffset:1},{strokeDashoffset:0}],{t,d:d||
 const slide=(sel,dx,dy,t,s)=>A(sel,[{opacity:0,transform:`translate(${dx}px,${dy}px)`},{opacity:1,transform:"translate(0,0)"}],{t,s:s??90,d:750});
 function countUp(id,to,t,dec=0){ const el=document.getElementById(id); if(!el)return; const fin=to.toLocaleString("en-US",{maximumFractionDigits:dec}).replace("-","−"); if(reduce){el.textContent=fin;return;}
   const t0=performance.now()+t; el.textContent="0"; const tick=now=>{ const k=Math.min(1,Math.max(0,(now-t0)/700)); el.textContent=k<1?Math.round(to*k).toLocaleString("en-US").replace("-","−"):fin; if(k<1&&document.body.contains(el))requestAnimationFrame(tick); }; requestAnimationFrame(tick); }
-const MK=`<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>`;
+const mk=(id,c)=>`<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(${c})"/></marker>`;
+const MK=`<defs>${mk("ah","--ink")}${mk("ahs","--server")}${mk("ahc","--client")}${mk("ahm","--muted")}</defs>`;
 const svg=(h,inner,label)=>`<svg viewBox="0 0 800 ${h}" role="img" aria-label="${label}">${MK}${inner}</svg>`;
 const tile=(x,y,w,h,txt,cls,extra="")=>`<g class="${cls}"><rect class="anim ${extra}" x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="currentColor" fill-opacity=".12" stroke="currentColor" stroke-width="2"/><text class="anim mono ${extra}" x="${x+w/2}" y="${y+h/2+5}" text-anchor="middle" font-size="15" fill="currentColor">${txt}</text></g>`;
 const lock=(x,y,cls="c-client")=>`<g class="${cls} lock anim"><rect x="${x}" y="${y+7}" width="14" height="11" rx="2" fill="currentColor"/><path d="M${x+3},${y+8} v-3 a4,4 0 0 1 8,0 v3" fill="none" stroke="currentColor" stroke-width="2"/></g>`;
@@ -227,7 +234,7 @@ const steps=[
         <path class="edge" pathLength="1" stroke-dasharray="1" d="M150,130 C260,130 300,190 410,190" fill="none" stroke="currentColor" stroke-width="3"/>
         <path class="edge" pathLength="1" stroke-dasharray="1" d="M150,270 C260,270 300,190 410,190" fill="none" stroke="currentColor" stroke-width="3"/>
         <path class="edge" pathLength="1" stroke-dasharray="1" d="M450,190 L530,190" fill="none" stroke="currentColor" stroke-width="3"/>
-        <path class="edge" pathLength="1" stroke-dasharray="1" d="M620,190 L692,190" fill="none" stroke="currentColor" stroke-width="3" marker-end="url(#ah)"/>
+        <path class="edge" pathLength="1" stroke-dasharray="1" d="M620,190 L686,190" fill="none" stroke="currentColor" stroke-width="3" marker-end="url(#ahs)"/>
         <text class="wl" x="260" y="135" font-size="14" fill="currentColor">w₁ = 0.5</text>
         <text class="wl" x="260" y="262" font-size="14" fill="currentColor">w₂ = −0.25</text>
         <circle class="anim node" cx="430" cy="190" r="34" fill="var(--panel)" stroke="currentColor" stroke-width="3"/>
@@ -263,9 +270,9 @@ const steps=[
       ${["s₀","s₁","s₂","s₃"].map((t,i)=>small(67+i*62,186,t,'text-anchor="middle"')).join("")}
       <g class="c-client">${lock(152,210)}</g>${small(175,224,"never sent")}
       <line x1="320" y1="30" x2="320" y2="310" stroke="currentColor" stroke-dasharray="4 6" opacity=".5"/>${small(330,300,"network")}
-      <g class="c-muted"><path class="flow" pathLength="1" stroke-dasharray="1" d="M290,137 C360,137 380,70 462,70" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#ah)"/>
-      <path class="flow" pathLength="1" stroke-dasharray="1" d="M290,137 L462,150" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#ah)"/>
-      <path class="flow" pathLength="1" stroke-dasharray="1" d="M290,137 C360,137 380,230 462,230" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#ah)"/></g>
+      <g class="c-muted"><path class="flow" pathLength="1" stroke-dasharray="1" d="M290,137 C360,137 380,70 462,70" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#ahm)"/>
+      <path class="flow" pathLength="1" stroke-dasharray="1" d="M290,137 L462,150" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#ahm)"/>
+      <path class="flow" pathLength="1" stroke-dasharray="1" d="M290,137 C360,137 380,230 462,230" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#ahm)"/></g>
       ${key(40,"public key","encrypt new data",0)}${key(120,"relinearization key","encrypts s² · fixes ct × ct",1)}${key(200,"rotation key","encrypts s(X⁵) · moves slots",2)}`,
       "The four secret key coefficients stay with the client; public, relinearization and rotation keys are derived and sent to the server."); },
   play(){ A(".sk",[{opacity:0,transform:"scaleY(0)"},{opacity:1,transform:"scaleY(1)"}],{s:110,d:500}); pop(".lock",600); draw(".flow",800,600); slide(".keyg",-120,0,1100,160); },
@@ -275,21 +282,21 @@ const steps=[
   title:"Encode: numbers become a polynomial",
   cap:()=>`Scale by Δ = 2²⁰ to keep about 6 decimals, then pack both numbers into one polynomial. Every later operation hits both slots at once.`,
   scene(){ const sc=R.x.map(v=>Math.round(v*2**20));
-    const ring=(cx,cy,r)=>{ let g=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="currentColor" opacity=".35"/>`+small(cx,cy+r+22,"where the slots live",'text-anchor="middle"');
+    const ring=(cx,cy,r)=>{ let g=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="currentColor" opacity=".35"/>`+small(cx,cy+r+24,"the 4 roots of X⁴ + 1",'text-anchor="middle"')+`<g class="c-client"><text x="${cx}" y="${cy+r+44}" text-anchor="middle" font-size="12" fill="currentColor">slot 1 = m(ζ)/Δ · slot 2 = m(ζ⁵)/Δ</text></g>`;
       [[1,"slot 1"],[5,"slot 2"],[7,""],[3,""]].forEach(([k,t],i)=>{ const a=k*Math.PI/4, x=cx+r*Math.cos(a), y=cy-r*Math.sin(a);
-        g+=`<g class="${t?"c-client":"c-muted"} rootpt"><circle class="anim" cx="${x}" cy="${y}" r="${t?8:5}" fill="currentColor"/>${t?`<text x="${x+(Math.cos(a)>0?14:-14)}" y="${y+(Math.sin(a)>0?-8:18)}" font-size="12" text-anchor="${Math.cos(a)>0?"start":"end"}" fill="currentColor">${t} = m(ζ${k===1?"":"⁵"})/Δ</text>`:""}</g>`; }); return g; };
+        g+=`<g class="${t?"c-client":"c-muted"} rootpt"><circle class="anim" cx="${x}" cy="${y}" r="${t?8:5}" fill="currentColor"/>${t?`<text x="${x+(Math.cos(a)>0?12:-12)}" y="${y+4}" font-size="13" font-weight="700" text-anchor="${Math.cos(a)>0?"start":"end"}" fill="currentColor">${t.slice(-1)}</text>`:""}</g>`; }); return g; };
     return svg(360,`
       ${small(40,40,"SLOTS")}
       <g class="sl">${tile(40,52,90,54,+R.x[0].toFixed(3),"c-client")}</g><g class="sl">${tile(140,52,90,54,+R.x[1].toFixed(3),"c-client")}</g>
-      <g class="c-muted ar1"><line x1="240" y1="79" x2="300" y2="79" stroke="currentColor" stroke-width="2" marker-end="url(#ah)"/></g>${small(270,68,"× Δ",'text-anchor="middle"')}
+      <g class="c-muted ar1"><line x1="240" y1="79" x2="302" y2="79" stroke="currentColor" stroke-width="2" marker-end="url(#ahm)"/></g>${small(270,68,"× Δ",'text-anchor="middle"')}
       ${small(310,40,"SCALED INTEGERS")}
       <g class="c-client sc"><rect x="310" y="52" width="110" height="54" rx="6" fill="none" stroke="currentColor" stroke-width="2"/><text id="cu0" class="mono" x="365" y="84" text-anchor="middle" font-size="14" fill="currentColor">${sc[0]}</text></g>
       <g class="c-client sc"><rect x="430" y="52" width="110" height="54" rx="6" fill="none" stroke="currentColor" stroke-width="2"/><text id="cu1" class="mono" x="485" y="84" text-anchor="middle" font-size="14" fill="currentColor">${sc[1]}</text></g>
-      <g class="c-muted ar2"><path d="M425,114 C425,150 300,150 300,178" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#ah)"/></g>${small(430,150,"inverse embedding")}
-      ${small(40,200,"POLYNOMIAL  m(X) = m₀ + m₁X + m₂X² + m₃X³")}
+      <g class="c-muted ar2"><path d="M310,114 v8 h230 v-8 M425,122 V188" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#ahm)"/><path d="M40,204 v-8 h510 v8" fill="none" stroke="currentColor" stroke-width="2"/></g>${small(436,160,"inverse embedding")}
+      ${small(40,184,"POLYNOMIAL  m(X) = m₀ + m₁X + m₂X² + m₃X³")}
       ${R.m.map((c,i)=>`<g class="co">${tile(40+i*130,212,120,54,big(c),"c-client")}</g>`).join("")}
       ${["m₀","m₁","m₂","m₃"].map((t,i)=>small(100+i*130,288,t,'text-anchor="middle"')).join("")}
-      ${ring(680,110,60)}`,
+      ${ring(680,100,56)}`,
       "Two slot values are multiplied by delta, then turned into four integer polynomial coefficients; the slots are the polynomial's values at two roots of unity."); },
   play(){ pop(".sl",0,120); fade(".ar1",400); pop(".sc",600,120); countUp("cu0",Math.round(R.x[0]*2**20),600); countUp("cu1",Math.round(R.x[1]*2**20),700); fade(".ar2",1300); slide(".co",0,-40,1500,110); pop(".rootpt",2000,120); },
   math:()=>`<div class="formula">m(X) = ${polyStr(R.m)}</div><div class="formula">decode(m) = [ ${R.back.map(v=>v.toFixed(6)).join(", ")} ]   rounding error ${fe(Math.abs(R.back[0]-R.x[0]))}</div><p>Slot j is the value of m(X) at a complex root of X⁴ + 1, divided by Δ. Because evaluating polynomials respects + and ×, adding or multiplying polynomials adds or multiplies all slots at once. This is SIMD packing.</p>`
@@ -322,8 +329,8 @@ const steps=[
 { key:"× w", who:"server", whoT:"server", at:1, lv:3, scale:"Δ² → Δ", err:()=>R.err.w,
   title:"Multiply by the weights, then rescale",
   cap:()=>`One multiplication scales both slots by w at once. The scale jumps to Δ², so the server divides by Δ and drops 20 bits: one level is gone.`,
-  scene(){ const enc=(x,y,t)=>`<g class="c-client">${tile(x,y,96,52,t,"c-client")}</g>${lock(x+76,y-10)}`;
-    return svg(360,`
+  scene(){ const enc=(x,y,t)=>`<g class="c-client">${tile(x,y,96,52,t,"c-client")}</g>${lock(x+74,y+6)}`;
+    return svg(372,`
       ${small(40,34,"ENCRYPTED SLOTS")}${enc(40,46,"x₁")}${enc(146,46,"x₂")}
       <text class="op" x="268" y="80" font-size="26" fill="currentColor" text-anchor="middle">×</text>
       ${small(300,34,"PLAINTEXT WEIGHTS")}<g class="wt">${tile(300,46,96,52,"0.5","c-server")}</g><g class="wt">${tile(406,46,96,52,"−0.25","c-server")}</g>
@@ -335,7 +342,7 @@ const steps=[
         <rect x="40" y="206" width="720" height="40" rx="4" fill="none" stroke="currentColor"/>
         <rect x="40" y="206" width="400" height="40" fill="currentColor" opacity=".07"/>
         <g class="c-client"><rect x="440" y="206" width="320" height="40" fill="currentColor" opacity=".35"/></g>
-        <text x="600" y="231" text-anchor="middle" font-size="13" fill="currentColor" class="c-client">Δ²·(x⊙w): 40 bits</text>
+        <text x="520" y="231" text-anchor="middle" font-size="13" fill="currentColor" class="c-client">Δ²·(x⊙w): 40 bits</text>
         <g class="cut c-noise"><rect x="600" y="202" width="160" height="48" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="5 4"/><text x="680" y="268" text-anchor="middle" font-size="12" fill="currentColor">÷ Δ removes 20 bits</text></g>
       </g>
       <g class="regB">${small(40,300,"after rescale: scale Δ, level 2, 70 bits")}
@@ -360,14 +367,14 @@ const steps=[
       ${row(30,f(R.v4[0]),f(R.v4[1]),"r1","ct  (x⊙w)")}
       <g class="r2"><g class="sw1">${tile(250,120,120,50,f(R.vr[0]),"c-server")}</g><g class="sw2">${tile(390,120,120,50,f(R.vr[1]),"c-server")}</g></g>${lbl(40,151,"rotate(ct)")}
       <g class="c-muted"><text x="540" y="140" font-size="13" fill="currentColor">X → X⁵ swaps the slots</text><text x="540" y="158" font-size="12" fill="currentColor">+ key switch (rotation key)</text></g>
-      <text class="pl" x="230" y="210" font-size="22" fill="currentColor">+</text>
+      <text class="pl" x="226" y="248" font-size="24" fill="currentColor" text-anchor="middle">+</text><g class="c-server sw"><line x1="318" y1="84" x2="448" y2="116" stroke="currentColor" stroke-width="2" marker-end="url(#ahs)"/><line x1="448" y1="84" x2="318" y2="116" stroke="currentColor" stroke-width="2" marker-end="url(#ahs)"/></g>
       ${row(215,f(R.v5[0]),f(R.v5[1]),"r3","ct + rotate(ct)")}
       <g class="c-muted pl"><text x="540" y="240" font-size="13" fill="currentColor">every slot now holds w₁x₁ + w₂x₂</text></g>
       <g class="bias">${tile(320,282,120,36,"+ b = 0.1","c-server")}</g>
       ${row(330,f(R.vz[0]),f(R.vz[1]),"r4","z")}
       <g class="c-ok r4"><text x="540" y="361" font-size="13" fill="currentColor">z = ${f(R.z)} hidden in both slots</text></g>`,
       "A copy of the ciphertext is rotated so the two slots swap places, then added to the original so both slots hold the sum, and the bias is added."); },
-  play(){ fade(".r1",0); slide(".r2",0,-90,400,0); A(".sw1",[{transform:"translate(140px,0)"},{transform:"translate(0,0)"}],{t:1000,d:800}); A(".sw2",[{transform:"translate(-140px,0)"},{transform:"translate(0,0)"}],{t:1000,d:800}); fade(".pl",1800); pop(".r3",2000,0); slide(".bias",0,-40,2600); pop(".r4",3000,0); },
+  play(){ fade(".r1",0); slide(".r2",0,-90,400,0); fade(".sw",900); A(".sw1",[{transform:"translate(140px,0)"},{transform:"translate(0,0)"}],{t:1000,d:800}); A(".sw2",[{transform:"translate(-140px,0)"},{transform:"translate(0,0)"}],{t:1000,d:800}); fade(".pl",1800); pop(".r3",2000,0); slide(".bias",0,-40,2600); pop(".r4",3000,0); },
   math:()=>`<table class="nums"><thead><tr><th>after</th><th>slot 1</th><th>slot 2</th><th>error</th></tr></thead><tbody>
     <tr><td>rotate(ct)</td><td class="v">${f(R.vr[0],6)}</td><td class="v">${f(R.vr[1],6)}</td><td class="v c-noise">${fe(Math.abs(R.vr[0]-R.prod[1]))}</td></tr>
     <tr><td>ct + rotate(ct)</td><td class="v">${f(R.v5[0],6)}</td><td class="v">${f(R.v5[1],6)}</td><td class="v c-noise">${fe(Math.abs(R.v5[0]-R.dot))}</td></tr>
@@ -379,19 +386,19 @@ const steps=[
   cap:()=>`CKKS can only add and multiply, so ReLU is replaced by p(z) = 0.094 + 0.5z + 0.469z². Two more multiplications use up the last levels.`,
   scene(){ const X0=40,X1=470,Y0=330,Y1=40, xmin=-1.5,xmax=1.5,ymin=-0.2,ymax=1.6;
     const sx=v=>X0+(v-xmin)/(xmax-xmin)*(X1-X0), sy=v=>Y0-(v-ymin)/(ymax-ymin)*(Y0-Y1);
-    const path=fn=>{ let d=""; for(let i=0;i<=90;i++){ const v=xmin+(xmax-xmin)*i/90; d+=(i?"L":"M")+sx(v).toFixed(1)+","+sy(Math.min(ymax,Math.max(ymin,fn(v)))).toFixed(1); } return d; };
+    const path=fn=>{ let d=""; for(let i=0;i<=90;i++){ const v=xmin+(xmax-xmin)*i/90; d+=(i?"L":"M")+sx(v).toFixed(1)+","+sy(Math.min(ymax+0.4,Math.max(ymin-0.4,fn(v)))).toFixed(1); } return d; };
     const p=v=>C0+C1*v+C2*v*v, z=Math.min(xmax,Math.max(xmin,R.z));
-    let g=`<rect x="${sx(-1)}" y="${Y1}" width="${sx(1)-sx(-1)}" height="${Y0-Y1}" fill="currentColor" opacity=".05"/>${small((sx(-1)+sx(1))/2,Y1+16,"fitted on [−1, 1]",'text-anchor="middle"')}
+    let g=`<clipPath id="pc"><rect x="${X0}" y="${Y1}" width="${X1-X0}" height="${Y0-Y1}"/></clipPath><rect x="${sx(-1)}" y="${Y1}" width="${sx(1)-sx(-1)}" height="${Y0-Y1}" fill="currentColor" opacity=".05"/>${small(sx(-1)+8,Y1+16,"fitted on [−1, 1]")}
       <line x1="${X0}" y1="${sy(0)}" x2="${X1}" y2="${sy(0)}" stroke="currentColor" opacity=".35"/><line x1="${sx(0)}" y1="${Y1}" x2="${sx(0)}" y2="${Y0}" stroke="currentColor" opacity=".35"/>
       ${[-1,1].map(t=>small(sx(t),sy(0)+16,String(t).replace("-","−"),'text-anchor="middle"')).join("")}${small(sx(0)-6,sy(1)+4,"1",'text-anchor="end"')}
-      <g class="c-ok"><path class="cv" pathLength="1" stroke-dasharray="1" d="${path(v=>Math.max(0,v))}" fill="none" stroke="currentColor" stroke-width="3"/><text x="${sx(1.45)}" y="${sy(1.45)+20}" text-anchor="end" font-size="13" fill="currentColor">ReLU</text></g>
-      <g class="c-server"><path class="cv" pathLength="1" stroke-dasharray="1" d="${path(p)}" fill="none" stroke="currentColor" stroke-width="3"/><text x="${sx(-1.42)}" y="${sy(1.05)}" font-size="13" fill="currentColor">p(z)</text></g>
+      <g clip-path="url(#pc)"><g class="c-ok"><path class="cv" pathLength="1" stroke-dasharray="1" d="${path(v=>Math.max(0,v))}" fill="none" stroke="currentColor" stroke-width="3"/></g>
+      <g class="c-server"><path class="cv" pathLength="1" stroke-dasharray="1" d="${path(p)}" fill="none" stroke="currentColor" stroke-width="3"/></g></g><g class="c-ok"><text x="${sx(1.3)+6}" y="${sy(1.05)}" font-size="13" font-weight="700" fill="currentColor">ReLU</text></g><g class="c-server"><text x="${sx(-1.45)}" y="${sy(0.95)}" font-size="13" font-weight="700" fill="currentColor">p(z)</text></g>
       <g class="pt"><line x1="${sx(z)}" y1="${sy(Math.max(0,z))}" x2="${sx(z)}" y2="${sy(Math.min(ymax,p(z)))}" class="c-warn" stroke="currentColor" stroke-width="3"/>
       <g class="c-ok"><circle cx="${sx(z)}" cy="${sy(Math.max(0,z))}" r="6" fill="currentColor"/></g><g class="c-server"><circle cx="${sx(z)}" cy="${sy(Math.min(ymax,p(z)))}" r="6" fill="currentColor"/></g>
-      <text x="${sx(z)+12}" y="${sy(Math.max(0,z))+22}" font-size="13" fill="currentColor" class="c-warn">gap ${Math.abs(p(z)-Math.max(0,z)).toFixed(3)} at z = ${f(R.z,2)}</text></g>
+      <text x="${sx(z)+14}" y="${sy(Math.max(0,z))+26}" font-size="13" fill="currentColor" class="c-warn">gap ${Math.abs(p(z)-Math.max(0,z)).toFixed(3)} at z = ${f(R.z,2)}</text></g>
       ${Math.abs(R.z)>1?`<text x="${X1}" y="${Y0+22}" text-anchor="end" font-size="13" fill="currentColor" class="c-warn">z outside the interval: badly wrong</text>`:""}`;
     const node=(y,t,lv,i)=>`<g class="pipe"><g class="c-server"><rect x="540" y="${y}" width="170" height="44" rx="6" fill="currentColor" fill-opacity=".1" stroke="currentColor" stroke-width="2"/><text x="625" y="${y+27}" text-anchor="middle" font-size="14" fill="currentColor" class="mono">${t}</text></g>
-      <g class="c-client"><rect x="720" y="${y+10}" width="44" height="24" rx="4" fill="currentColor" fill-opacity=".15" stroke="currentColor"/><text x="742" y="${y+27}" text-anchor="middle" font-size="12" fill="currentColor" class="mono">${lv}</text></g>${i<3?`<line x1="625" y1="${y+44}" x2="625" y2="${y+64}" stroke="currentColor" stroke-width="2" marker-end="url(#ah)"/>`:""}</g>`;
+      <g class="c-client"><rect x="720" y="${y+10}" width="44" height="24" rx="4" fill="currentColor" fill-opacity=".15" stroke="currentColor"/><text x="742" y="${y+27}" text-anchor="middle" font-size="12" fill="currentColor" class="mono">${lv}</text></g>${i<3?`<line x1="625" y1="${y+44}" x2="625" y2="${y+66}" stroke="currentColor" stroke-width="2" marker-end="url(#ahs)"/>`:""}</g>`;
     g+=small(540,40,"evaluation order")+node(52,"z","L2",0)+node(120,"z · z  (relin)","L1",1)+node(188,"× 0.46875","L0",2)+node(256,"+ 0.5z + 0.094","L0",3);
     g+=`<g class="boot c-warn"><rect x="540" y="318" width="224" height="34" rx="6" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="5 4"/><text x="652" y="340" text-anchor="middle" font-size="13" fill="currentColor">next layer needs bootstrapping</text></g>`;
     return svg(370,g,"ReLU and its degree-two polynomial approximation, with the gap at the current z, and the evaluation order that consumes levels down to L0."); },
@@ -440,6 +447,50 @@ const steps=[
   math:()=>`<p>Toy parameters: N = 4, Δ = 2²⁰, levels q = 2³⁰, 2⁵⁰, 2⁷⁰, 2⁹⁰. Real CKKS LLM inference uses N = 2¹⁶, a modulus of about 1,500 bits split into ~60-bit primes, and bootstraps every few layers.</p>`
 }];
 
+/* ---------------- long explanations (under the figure) ---------------- */
+const EXPLAIN=[
+()=>`<p>Private inference has two parties. The <b class="c-client">client</b> has private data, here a token embedding x. The <b class="c-server">server</b> has a model it does not want to give away, here the weights w and bias b of one neuron.</p>
+<p>The neuron does the two kinds of work every Transformer layer does:</p>
+<ul><li><b>Linear:</b> z = w₁x₁ + w₂x₂ + b. This is a tiny matrix product. In an LLM, these products hold almost all the parameters and most of the arithmetic.</li>
+<li><b>Non-linear:</b> y = ReLU(z) = max(0, z). It stands in for GELU, SiLU, Softmax and LayerNorm. These are the operations encryption schemes find hardest.</li></ul>
+<p>In the non-interactive setting the client sends one encrypted message and gets one encrypted answer back. The server must do all the work without ever seeing x, z or y. Every lesson in this series uses exactly these numbers, so you can compare how each scheme copes with each half of the neuron.</p>`,
+()=>`<p>CKKS keys are polynomials. In this toy every polynomial has 4 coefficients, and arithmetic wraps around with X⁴ = −1. The <b class="c-client">secret key</b> s has coefficients in {−1, 0, 1}. Small keys keep the noise small, and security comes from the size of the ring, not from large key values.</p>
+<p>From s the client derives three keys it can safely publish:</p>
+<ul><li><b>Public key</b> (−a·s + e, a). The random polynomial a hides s, and the small noise e makes the hiding hard to undo. This is the Ring Learning-With-Errors problem.</li>
+<li><b>Relinearization key</b>, an encryption of s². Multiplying two ciphertexts produces a term that needs s² to decrypt. This key lets the server turn it back into a normal ciphertext.</li>
+<li><b>Rotation key</b>, an encryption of s(X⁵). Moving values between slots changes the key to s(X⁵). This key switches it back to s.</li></ul>
+<p>In real deployments these evaluation keys are large, often gigabytes. Their size is one reason the SoK highlights small-key bootstrapping research.</p>`,
+()=>`<p>Encryption works on integer polynomials, but our data are real numbers. Encoding bridges the two in two moves.</p>
+<h3>1. Scale</h3><p>Multiply by Δ = 2²⁰ and round. Then 1.5 becomes 1,572,864, and about six decimal digits survive the rounding. A larger Δ keeps more digits but uses more of the modulus at every multiplication.</p>
+<h3>2. Pack</h3><p>Find the polynomial m(X) whose values at two special complex numbers, roots of X⁴ + 1, equal the two scaled inputs. The other two roots are mirror images and hold the complex conjugates, so the coefficients come out real.</p>
+<p>Why bother? Because adding or multiplying polynomials adds or multiplies their values at every root at the same time. One polynomial operation is a vector operation on all slots. With N = 65,536, one ciphertext carries 32,768 numbers. This SIMD packing is the main reason CKKS dominates encrypted LLM work.</p>`,
+()=>`<p>Encryption adds the message to an encryption of zero built from the public key: c₀ = pk₀·u + e₀ + Δm and c₁ = pk₁·u + e₁, with a fresh random u and small noises e₀, e₁.</p>
+<p>Anyone holding s can compute c₀ + c₁·s. The large random parts cancel and leave Δm + e, where e is a few units. Without s the two polynomials are indistinguishable from random numbers. That is why the bars look like noise.</p>
+<p>The register picture shows the layout of one decrypted coefficient. The noise sits in the lowest bits and the scaled message just above it. The unused high bits are the budget the server will spend: every multiplication doubles the scale and needs a rescale that eats 20 bits.</p>
+<p>The noise is never cleaned away. CKKS treats it as part of the rounding error of approximate arithmetic. It is also why decrypted CKKS results must not be shared back with the server: they leak information about s (Li–Micciancio, EUROCRYPT 2021).</p>`,
+()=>`<p>The server encodes w = [0.5, −0.25] as a plaintext polynomial and multiplies it into both c₀ and c₁. Decryption is linear, so the result decrypts to Δ²·(x ⊙ w): each slot multiplied by its own weight, both at once.</p>
+<p>The scale is now Δ², a 40-bit number. If nothing were done, the next multiplication would make it Δ⁴, and the message would quickly overflow the modulus. <b>Rescaling</b> divides the ciphertext by Δ. That brings the scale back to Δ, removes 20 bits of modulus, and also divides the accumulated noise.</p>
+<p>The modulus is a ladder of levels, here 90 → 70 → 50 → 30 bits. Each multiplication climbs down one rung. Real CKKS keeps about 10 to 20 levels between bootstraps, so the depth of each layer is a hard budget the SoK frameworks plan carefully.</p>
+<p>Plaintext × ciphertext is the cheap case. It needs no key and adds little noise, which is why keeping the model weights unencrypted is the common SoK threat model.</p>`,
+()=>`<p>After the multiplication, slot 1 holds w₁x₁ and slot 2 holds w₂x₂, but we need their sum. CKKS can only add slot 1 to slot 1 and slot 2 to slot 2, so the values must first be lined up.</p>
+<p><b>Rotation</b> moves values between slots. Substituting X → X⁵ in both ciphertext polynomials permutes the slots, which here is a swap. The catch is that the ciphertext now decrypts under s(X⁵), not s. <b>Key switching</b> with the rotation key fixes that, at the cost of one expensive operation.</p>
+<p>Adding the rotated copy gives w₁x₁ + w₂x₂ in every slot. Adding the encoded bias gives z. Additions cost no level.</p>
+<p>For a length-n dot product, this rotate-and-add trick needs log₂ n rotations, 12 for n = 4096. Matrix products in LLMs are thousands of these, so the SoK's packing classes (row, column/diagonal, cyclic) are all strategies to need fewer rotations and fewer rotation keys.</p>`,
+()=>`<p>ReLU is a comparison, max(0, z), and CKKS has no comparison instruction. The standard fix is to evaluate a polynomial that is close to ReLU wherever z is expected to fall.</p>
+<p>Here p(z) = 0.09375 + 0.5z + 0.46875z² is the best degree-2 fit on [−1, 1]. It is the average of z and a quadratic fit to |z|. Inside the interval the gap is a few hundredths. Outside it the polynomial grows quickly and the answer becomes wrong. Try x₁ = 4 to see it.</p>
+<p>Evaluating p costs depth. <b>z · z</b> multiplies two ciphertexts, which yields three polynomials. Relinearization with the s² key compresses them back to two, then a rescale follows. Multiplying by 0.46875 is another rescale. The 0.5·z branch is rescaled and dropped to the same level so the parts can be added.</p>
+<p>We are now at level 0. Another layer would need <b>bootstrapping</b>, which homomorphically re-runs decryption to climb back up the ladder. It is the single most expensive CKKS operation. Real model-preserving frameworks use degree 15 to 60 approximations or iterative methods (Newton, Goldschmidt, normalize-and-square) and bootstrap many times per layer.</p>`,
+()=>`<p>The server returns one ciphertext. The client computes c₀ + c₁·s, divides by Δ and reads slot 1.</p>
+<p>Comparing three numbers separates two kinds of error:</p>
+<ul><li><b class="c-noise">Encryption noise</b>, the decrypted value minus p(z). It is set by Δ and the noise distribution, and is around 10⁻⁶ here.</li>
+<li><b class="c-warn">Approximation error</b>, p(z) minus ReLU(z). It is set by the polynomial degree and interval, and is around 10⁻² here.</li></ul>
+<p>This matches the SoK's finding for real models. With careful parameters, CKKS noise barely affects accuracy even for Llama-3-8B. The hard part is approximating the non-linear functions well enough without spending too much depth, and doing it fast. The best reported CKKS LLM inference is still about 10⁴ times slower than plaintext on the same GPUs.</p>`,
+()=>`<p>The card summarises how CKKS handled each half of the neuron. Later lessons fill in the same rows for the same inputs:</p>
+<ul><li><b>BFV/BGV</b> compute z exactly on integers (x scaled by 10), but ReLU is even harder.</li>
+<li><b>TFHE</b> evaluates ReLU exactly through a lookup table but packs only one value per ciphertext.</li>
+<li><b>Paillier</b> can do the linear part with additions only and cannot do ReLU at all.</li>
+<li><b>Gentry–Lee</b> encrypts whole matrices, so the rotate-and-add step disappears.</li></ul>`
+];
 /* ---------------- controller ---------------- */
 let cur=0, timer=null;
 const chips=$("chips");
@@ -453,11 +504,11 @@ function go(i,keepPlay){
   cur=Math.max(0,Math.min(steps.length-1,i)); const s=steps[cur];
   if(!keepPlay) stop();
   $("st-title").textContent=s.title; const w=$("st-who"); w.className="who "+s.who; w.textContent=s.whoT;
-  $("scene").innerHTML=s.scene(); $("st-cap").innerHTML=s.cap(); $("mathbody").innerHTML=s.math();
+  $("scene").innerHTML=s.scene(); $("st-cap").innerHTML=s.cap(); $("mathbody").innerHTML=s.math(); $("explainbody").innerHTML=EXPLAIN[cur]();
   [...chips.children].forEach((c,j)=>{ c.setAttribute("aria-current",j===cur?"step":"false"); c.classList.toggle("done",j<cur); });
   $("prev").disabled=cur===0; $("next").disabled=cur===steps.length-1;
   status(s); s.play();
-  try{ localStorage.setItem("ckks-step",cur); }catch(e){}
+  try{ localStorage.setItem("ckks-step",cur); history.replaceState(null,"","#step-"+cur); }catch(e){}
 }
 function stop(){ if(timer){ clearInterval(timer); timer=null; $("play").textContent="▶ Auto-play"; } }
 $("prev").onclick=()=>go(cur-1); $("next").onclick=()=>go(cur+1); $("replay").onclick=()=>go(cur,!!timer);
@@ -469,6 +520,7 @@ $("reseed").onclick=()=>{ seed=Math.floor(Math.random()*1e9); keygen(); recomput
 $("theme").onclick=()=>{ const r=document.documentElement; const d=r.dataset.theme?r.dataset.theme==="dark":matchMedia("(prefers-color-scheme: dark)").matches; r.dataset.theme=d?"light":"dark"; };
 keygen(); compute();
 let start=0; try{ start=+localStorage.getItem("ckks-step")||0; }catch(e){}
+const hm=/^#step-(\d+)$/.exec(location.hash); if(hm) start=+hm[1];
 go(start);
 })();
 </script>
