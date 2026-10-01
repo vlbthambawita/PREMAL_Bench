@@ -6,221 +6,36 @@
 <title>CKKS Step by Step</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-<style>
-/* Layout: one animated stage per step, a status strip under it, maths tucked in a drawer. Colour = who holds the data. */
-:root{
-  --paper:#f2f4f6; --panel:#ffffff; --ink:#15202b; --muted:#5a6672; --rule:#d4dbe1;
-  --client:#1d6aa3; --server:#7a46a6; --noise:#bd630f; --ok:#2b7649; --warn:#b03a2b;
-  --client-soft:#e2edf7; --server-soft:#eee6f6; --noise-soft:#f8e9d6;
-  --display:"Bricolage Grotesque","Segoe UI",system-ui,sans-serif;
-  --body:"Atkinson Hyperlegible","Segoe UI",system-ui,sans-serif;
-  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
-}
-@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
-  --paper:#0e1419; --panel:#151d25; --ink:#e4e9ee; --muted:#98a5b1; --rule:#28323c;
-  --client:#6eb2e6; --server:#bb97e2; --noise:#f0a057; --ok:#7cc89b; --warn:#ef8b7d;
-  --client-soft:#15283a; --server-soft:#241b33; --noise-soft:#33240f; color-scheme:dark; } }
-:root[data-theme="dark"]{
-  --paper:#0e1419; --panel:#151d25; --ink:#e4e9ee; --muted:#98a5b1; --rule:#28323c;
-  --client:#6eb2e6; --server:#bb97e2; --noise:#f0a057; --ok:#7cc89b; --warn:#ef8b7d;
-  --client-soft:#15283a; --server-soft:#241b33; --noise-soft:#33240f; color-scheme:dark; }
-*{box-sizing:border-box}
-html{background:var(--paper)}
-body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.55 var(--body);padding-inline:16px;padding-block:0 56px}
-.wrap{max-width:960px;margin:0 auto;display:grid;gap:16px}
-a{color:var(--client)}
-h1,h2{font-family:var(--display);font-weight:700;line-height:1.1;margin:0;text-wrap:balance}
-h1{font-size:clamp(30px,5vw,46px);letter-spacing:-.02em}
-h2{font-size:clamp(21px,3vw,27px)}
-p{margin:0}
-.mono{font-family:var(--mono)}
-.muted{color:var(--muted)}
-.eyebrow{font:600 12px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
-header{padding-block:28px 4px;display:grid;gap:10px}
-.top{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:14px;align-items:center}
-.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:14px}
-.legend span::before{content:"";display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:6px;vertical-align:-1px;background:currentColor}
-.c-client{color:var(--client)} .c-server{color:var(--server)} .c-noise{color:var(--noise)} .c-ok{color:var(--ok)} .c-warn{color:var(--warn)} .c-muted{color:var(--muted)}
-/* step chips */
-.chips{display:flex;gap:6px;flex-wrap:wrap}
-.chip{font:600 13px var(--body);border:1px solid var(--rule);background:var(--panel);color:var(--ink);border-radius:999px;padding:5px 12px;cursor:pointer;display:inline-flex;gap:6px;align-items:center}
-.chip b{font-family:var(--mono);font-size:12px;color:var(--muted)}
-.chip[aria-current="step"]{border-color:var(--client);background:var(--client-soft);color:var(--client)}
-.chip[aria-current="step"] b{color:var(--client)}
-.chip.done b{color:var(--ok)}
-/* stage */
-.stage{background:var(--panel);border:1px solid var(--rule);border-radius:12px;overflow:hidden}
-.stagehead{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:16px 20px 0;flex-wrap:wrap}
-.who{font:600 12px/1 var(--mono);padding:5px 9px;border-radius:4px;letter-spacing:.05em;text-transform:uppercase}
-.who.client{background:var(--client-soft);color:var(--client)} .who.server{background:var(--server-soft);color:var(--server)} .who.both{background:var(--noise-soft);color:var(--noise)}
-.scene{overflow-x:auto;padding:8px 12px 0}
-.scene svg{display:block;width:100%;height:auto;min-width:620px;font-family:var(--body)}
-svg .mono{font-family:var(--mono)}
-svg .anim{transform-box:fill-box;transform-origin:center}
-.caption{padding:4px 20px 16px;font-size:18px;max-width:70ch;min-height:3.2em}
-.nav{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:12px 20px;border-top:1px solid var(--rule)}
-.nav .grp{display:flex;gap:8px;flex-wrap:wrap}
-button{font:600 14px var(--body);padding:8px 14px;border-radius:6px;border:1px solid var(--client);background:var(--client);color:var(--panel);cursor:pointer}
-button.ghost{background:transparent;color:var(--client)}
-button:disabled{opacity:.4;cursor:default}
-button:focus-visible,.chip:focus-visible,summary:focus-visible,input:focus-visible{outline:2px solid var(--noise);outline-offset:2px}
-details.explain{margin:0 20px 16px;border-top:1px dashed var(--rule)}
-details.explain summary{cursor:pointer;padding:10px 0 4px;font-weight:700;color:var(--client)}
-.explainbody{display:grid;gap:10px;padding:6px 0 4px;max-width:70ch;font-size:16.5px}
-.explainbody h3{font:700 15px var(--display);margin:6px 0 0}
-.explainbody ul{margin:0;padding-left:20px;display:grid;gap:4px}
-/* status strip */
-.status{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
-.stat{background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:10px 12px;display:grid;gap:6px;min-width:0}
-.stat .k{font:600 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
-.stat .v{font:600 16px var(--mono);font-variant-numeric:tabular-nums}
-.levels{display:flex;gap:4px}
-.levels i{flex:1;height:18px;border-radius:3px;border:1px solid var(--client);background:var(--client-soft);transition:background .4s,border-color .4s,opacity .4s}
-.levels i.gone{background:transparent;border-color:var(--rule);opacity:.6}
-.where{display:flex;align-items:center;gap:6px;font:600 13px var(--mono)}
-.where .track{flex:1;height:4px;background:var(--rule);border-radius:2px;position:relative;min-width:40px}
-.where .dot{position:absolute;top:-5px;width:14px;height:14px;border-radius:50%;background:var(--noise);transition:left .7s cubic-bezier(.3,.7,.2,1);left:0}
-/* drawer */
-details.math{background:var(--panel);border:1px solid var(--rule);border-radius:8px}
-details.math summary{cursor:pointer;padding:10px 16px;font-weight:700;list-style-position:inside}
-.mathbody{padding:0 16px 14px;display:grid;gap:10px;overflow-x:auto}
-.formula{font:15px var(--mono);background:var(--paper);border-radius:6px;padding:8px 12px;white-space:nowrap;overflow-x:auto}
-table.nums{border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums;width:100%}
-table.nums th,table.nums td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--rule);white-space:nowrap}
-table.nums th{font:600 11px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
-table.nums td.v{font-family:var(--mono)}
-.mathbody p{font-size:15.5px;max-width:72ch}
-/* try row */
-.try{display:flex;gap:10px;flex-wrap:wrap;align-items:end;font-size:14px}
-.try label{display:grid;gap:3px;font:600 11px var(--mono);color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
-.try input{font:15px var(--mono);width:90px;padding:6px 8px;border:1px solid var(--rule);border-radius:5px;background:var(--panel);color:var(--ink)}
-/* glance */
-.glance{display:grid;grid-template-columns:minmax(150px,220px) 1fr;margin:0;font-size:15.5px}
-.glance dt,.glance dd{margin:0;padding:9px 20px;border-bottom:1px solid var(--rule)}
-.glance dt{font:600 11.5px/1.5 var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
-.next{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;padding:16px 20px}
-.next div{border:1px dashed var(--rule);border-radius:8px;padding:10px 12px;font-size:14.5px;min-width:0}
-.next b{font-family:var(--display)}
-footer{font-size:13px;color:var(--muted)}
-@media (max-width:560px){ .glance{grid-template-columns:1fr} .glance dt{border-bottom:0;padding-bottom:0} .caption{font-size:16.5px} }
-</style>
+<link rel="stylesheet" href="lesson.css">
 </head>
 <body>
-<div class="wrap">
-<header>
-  <div class="top"><a href="../index.html">← Schemes table</a><span class="muted">Lesson 1 · same neuron in every lesson</span><button class="ghost" id="theme" type="button">Theme</button></div>
-  <h1>CKKS Step by Step</h1>
-  <div class="legend" aria-label="Colour legend"><span class="c-client">client and secret key</span><span class="c-server">server and its work</span><span class="c-noise">noise and error</span></div>
-</header>
-
-<nav class="chips" id="chips" aria-label="Steps"></nav>
-
-<article class="stage" aria-live="polite">
-  <div class="stagehead"><h2 id="st-title">…</h2><span class="who" id="st-who">…</span></div>
-  <div class="scene" id="scene"></div>
-  <p class="caption" id="st-cap">…</p>
-  <details class="explain" id="explain"><summary>Read the full explanation</summary><div class="explainbody" id="explainbody"></div></details>
-  <div class="nav">
-    <div class="grp"><button class="ghost" id="prev" type="button">← Back</button><button id="next" type="button">Next →</button></div>
-    <div class="grp"><button class="ghost" id="replay" type="button">↻ Replay</button><button class="ghost" id="play" type="button">▶ Auto-play</button></div>
-  </div>
-</article>
-
-<div class="status" aria-label="State of the computation">
-  <div class="stat"><span class="k">Data is at</span><div class="where"><span class="c-client">client</span><span class="track"><span class="dot" id="s-dot"></span></span><span class="c-server">server</span></div></div>
-  <div class="stat"><span class="k">Levels left</span><div class="levels" id="s-lv"><i></i><i></i><i></i><i></i></div></div>
-  <div class="stat"><span class="k">Scale</span><span class="v" id="s-scale">Δ = 2²⁰</span></div>
-  <div class="stat"><span class="k">Error so far</span><span class="v c-noise" id="s-err">0</span></div>
-</div>
-
-<details class="math" id="math"><summary>Show the maths for this step</summary><div class="mathbody" id="mathbody"></div></details>
-
-<div class="try" role="group" aria-label="Try your own input">
-  <label for="in-x1">x₁<input id="in-x1" type="number" step="0.1" value="1.5"></label>
-  <label for="in-x2">x₂<input id="in-x2" type="number" step="0.1" value="2.0"></label>
-  <button class="ghost" id="reseed" type="button">New random keys</button>
-  <span class="muted">Change x and every ciphertext is recomputed. Keep |z| ≤ 1 so ReLU stays accurate.</span>
-</div>
-
-<footer>Real toy CKKS in your browser: N = 4, Δ = 2²⁰, q = 2⁹⁰ with levels at 2³⁰, 2⁵⁰, 2⁷⁰, 2⁹⁰, key-switching modulus 2¹⁰⁰. Insecure sizes, real algebra. Scheme: Cheon, Kim, Kim, Song, <a href="https://eprint.iacr.org/2016/421">ASIACRYPT 2017</a>.</footer>
-</div>
-
+<div id="app"></div>
+<script src="lessons.js"></script>
+<script src="cards/ckks.js"></script>
+<script src="lesson.js"></script>
+<script src="engines/ckks.js"></script>
 <script>
 (function(){
 "use strict";
-/* ---------------- toy CKKS engine ---------------- */
-const N=4, DB=20n, D=1n<<DB, P=1n<<100n, L=3, q=[30n,50n,70n,90n].map(b=>1n<<b);
-const W=[0.5,-0.25], B=0.1, C0=0.09375, C1=0.5, C2=0.46875;
-let seed=20261001;
-const $=id=>document.getElementById(id);
-function rng(){ seed|=0; seed=seed+0x6D2B79F5|0; let t=Math.imul(seed^seed>>>15,1|seed); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }
-function randBig(m){ let x=0n; for(let i=0;i<5;i++) x=(x<<32n)|BigInt(Math.floor(rng()*4294967296)); return x%m; }
-const tern=()=>BigInt(Math.floor(rng()*3)-1), err=()=>BigInt(Math.round((rng()+rng()+rng()-1.5)*1.3));
-const cmod=(x,m)=>{ x%=m; if(x<0n)x+=m; if(x>m/2n)x-=m; return x; };
-const fdiv=(x,d)=>{ let r=x/d; if(x%d!==0n&&(x<0n)!==(d<0n)) r-=1n; return r; }, rdiv=(x,d)=>fdiv(x+d/2n,d);
-const red=(a,m)=>a.map(v=>cmod(v,m)), padd=(a,b,m)=>red(a.map((v,i)=>v+b[i]),m), pneg=a=>a.map(v=>-v);
-function pmul(a,b,m){ const c=[0n,0n,0n,0n]; for(let i=0;i<N;i++)for(let j=0;j<N;j++){ const k=i+j; if(k<N)c[k]+=a[i]*b[j]; else c[k-N]-=a[i]*b[j]; } return red(c,m); }
-function auto5(a){ const c=[0n,0n,0n,0n]; for(let k=0;k<N;k++){ const e=(5*k)%(2*N); if(e<N)c[e]+=a[k]; else c[e-N]-=a[k]; } return c; }
-const ang=[1,5,7,3].map(k=>k*Math.PI/4);
-function encode(z,sc){ const v=[z[0],z[1],z[0],z[1]], m=[]; for(let k=0;k<N;k++){ let re=0; for(let j=0;j<N;j++) re+=v[j]*Math.cos(-ang[j]*k); m.push(BigInt(Math.round(re/N*Number(sc)))); } return m; }
-function decode(m,sc){ return [0,1].map(j=>{ let re=0; for(let k=0;k<N;k++) re+=Number(m[k])*Math.cos(ang[j]*k); return re/Number(sc); }); }
-let K;
-function keygen(){ let s; do{ s=[tern(),tern(),tern(),tern()]; }while(s.every(v=>v===0n));
-  const Q=q[L], a=[0,1,2,3].map(()=>randBig(Q)), e=[0,1,2,3].map(err), PQ=P*Q;
-  const swk=sp=>{ const a2=[0,1,2,3].map(()=>randBig(PQ)), e2=[0,1,2,3].map(err); return [red(pneg(pmul(a2,s,PQ)).map((v,i)=>v+e2[i]+P*sp[i]),PQ),a2]; };
-  K={s,pk:[padd(pneg(pmul(a,s,Q)),e,Q),a],rlk:swk(pmul(s,s,PQ)),rot:swk(auto5(s))}; }
-function encrypt(m){ const Q=q[L], u=[0,1,2,3].map(tern), e0=[0,1,2,3].map(err), e1=[0,1,2,3].map(err); return {c:[padd(padd(pmul(K.pk[0],u,Q),e0,Q),m,Q),padd(pmul(K.pk[1],u,Q),e1,Q)],l:L}; }
-const decRaw=ct=>padd(ct.c[0],pmul(ct.c[1],K.s,q[ct.l]),q[ct.l]);
-function ks(d,key,l){ const m=P*q[l], dd=red(d,q[l]); return [pmul(dd,red(key[0],m),m),pmul(dd,red(key[1],m),m)].map(t=>red(t.map(v=>rdiv(v,P)),q[l])); }
-const rescale=ct=>({c:ct.c.map(p=>red(red(p,q[ct.l]).map(v=>rdiv(v,D)),q[ct.l-1])),l:ct.l-1});
-const mulPt=(ct,pt)=>({c:ct.c.map(p=>pmul(p,pt,q[ct.l])),l:ct.l}), addPt=(ct,pt)=>({c:[padd(ct.c[0],pt,q[ct.l]),ct.c[1]],l:ct.l});
-const add=(a,b)=>({c:[padd(a.c[0],b.c[0],q[a.l]),padd(a.c[1],b.c[1],q[a.l])],l:a.l}), down=ct=>({c:ct.c.map(p=>red(p,q[ct.l-1])),l:ct.l-1});
-function mulCt(a,b){ const m=q[a.l], d0=pmul(a.c[0],b.c[0],m), d1=padd(pmul(a.c[0],b.c[1],m),pmul(a.c[1],b.c[0],m),m), r=ks(pmul(a.c[1],b.c[1],m),K.rlk,a.l); return {c:[padd(d0,r[0],m),padd(d1,r[1],m)],l:a.l}; }
-function rotate(ct){ const m=q[ct.l], r=ks(auto5(ct.c[1]),K.rot,ct.l); return {c:[padd(auto5(ct.c[0]),r[0],m),r[1]],l:ct.l}; }
-const val=(ct,sc)=>decode(decRaw(ct),sc||D), cst=c=>[BigInt(Math.round(c*Number(D))),0n,0n,0n];
+const {svg,tile,lock,lbl,small,A,pop,fade,draw,slide,countUp,f,fe,sup,big}=LS;
+const reduce=LS.reduce, ease="cubic-bezier(.2,.7,.2,1)", $=LS.$, hex=(v,m)=>LS.hex(v,m,5), polyStr=LS.poly.str;
+const C=CKKS.make({N:4,deltaBits:20,q0Bits:30,levels:3,pBits:100}), q=C.q, D=C.D;
+const W=LS.W, B=LS.B, C0=0.09375, C1=0.5, C2=0.46875;
 const frac=(v,m)=>Number((((v%m)+m)%m)*1000n/m)/1000;
-
 let R;
-function compute(){
-  const x1=parseFloat($("in-x1").value), x2=parseFloat($("in-x2").value);
-  const x=[isFinite(x1)?x1:1.5,isFinite(x2)?x2:2.0];
+function compute(inp){
+  const x=[inp.x1,inp.x2];
   const prod=[x[0]*W[0],x[1]*W[1]], dot=prod[0]+prod[1], z=dot+B, relu=Math.max(0,z), poly=C0+C1*z+C2*z*z;
-  const m=encode(x,D), ct=encrypt(m), dm=decRaw(ct);
-  const c4a=mulPt(ct,encode(W,D)), c4=rescale(c4a), c5r=rotate(c4), c5=add(c4,c5r), cz=addPt(c5,encode([B,B],D));
-  const zz=rescale(mulCt(cz,cz)), t=rescale(mulPt(zz,cst(C2))), u=down(rescale(mulPt(cz,cst(C1)))), y=addPt(add(t,u),cst(C0));
-  const V=c=>val(c); const yv=V(y)[0];
-  R={x,prod,dot,z,relu,poly,s:K.s,m,back:decode(m,D),ct,dm,e:dm.map((v,i)=>v-m[i]),
+  const m=C.encode(x), ct=C.encrypt(m), dm=C.decRaw(ct);
+  const c4a=C.mulPt(ct,C.encode(W)), c4=C.rescale(c4a), c5r=C.rotate(c4,1), c5=C.add(c4,c5r), cz=C.addPt(c5,C.encode([B,B]));
+  const zz=C.rescale(C.mulCt(cz,cz)), t=C.rescale(C.mulPt(zz,C.cst(C2))), u=C.down(C.rescale(C.mulPt(cz,C.cst(C1)))), y=C.addPt(C.add(t,u),C.cst(C0));
+  const V=c=>C.val(c), yv=V(y)[0];
+  R={x,prod,dot,z,relu,poly,s:C.K.s,m,back:C.decode(m),ct,dm,e:dm.map((v,i)=>v-m[i]),
      bars0:ct.c[0].map(v=>frac(v,q[3])), bars1:ct.c[1].map(v=>frac(v,q[3])),
-     v4a:val(c4a,D*D), v4:V(c4), vr:V(c5r), v5:V(c5), vz:V(cz), vzz:V(zz)[0], vt:V(t)[0], vu:V(u)[0], vy:yv,
-     err:{enc:Math.abs(decode(dm,D)[0]-x[0]), w:Math.max(Math.abs(V(c4)[0]-prod[0]),Math.abs(V(c4)[1]-prod[1])), z:Math.abs(V(cz)[0]-z), y:Math.abs(yv-poly)}};
+     v4a:C.val(c4a,D*D), v4:V(c4), vr:V(c5r), v5:V(c5), vz:V(cz), vzz:V(zz)[0], vt:V(t)[0], vu:V(u)[0], vy:yv,
+     err:{enc:Math.abs(C.decode(dm)[0]-x[0]), w:Math.max(Math.abs(V(c4)[0]-prod[0]),Math.abs(V(c4)[1]-prod[1])), z:Math.abs(V(cz)[0]-z), y:Math.abs(yv-poly)}};
+  return R;
 }
-/* ---------------- formatting ---------------- */
-const f=(x,d=4)=>{ if(Math.abs(x)<5e-13)x=0; return x.toFixed(d).replace("-","−"); };
-const sup=s=>String(s).replace(/[-\d]/g,c=>"⁻⁰¹²³⁴⁵⁶⁷⁸⁹"["-0123456789".indexOf(c)]);
-const fe=x=>{ const a=Math.abs(x); if(a<1e-15) return "0"; const e=Math.floor(Math.log10(a)); return (a/10**e).toFixed(1)+"×10"+sup(e); };
-const big=v=>v.toString().replace("-","−");
-const hex=(v,m)=>{ const h=(((v%m)+m)%m).toString(16).padStart(23,"0"); return h.slice(0,5)+"…"+h.slice(-3); };
-const polyStr=p=>{ const t=[]; p.forEach((c,i)=>{ if(c===0n)return; const a=c<0n?-c:c, mono=["","X","X²","X³"][i]; t.push((c<0n?"− ":"+ ")+(a===1n&&i?"":a)+mono); }); const r=t.join(" ")||"0"; return r.startsWith("+ ")?r.slice(2):r.replace(/^− /,"−"); };
-
-/* ---------------- svg helpers ---------------- */
-const reduce=matchMedia("(prefers-reduced-motion: reduce)").matches;
-const ease="cubic-bezier(.2,.7,.2,1)";
-function A(sel,kf,o={}){ if(reduce)return; $("scene").querySelectorAll(sel).forEach((el,i)=>el.animate(kf,{duration:o.d||650,delay:(o.t||0)+i*(o.s||0),easing:o.e||ease,fill:"backwards",iterations:o.n||1})); }
-const pop=(sel,t,s)=>A(sel,[{opacity:0,transform:"scale(.6)"},{opacity:1,transform:"scale(1)"}],{t,s:s??90});
-const fade=(sel,t,s)=>A(sel,[{opacity:0},{opacity:1}],{t,s:s??80,d:500});
-const draw=(sel,t,d)=>A(sel,[{strokeDashoffset:1},{strokeDashoffset:0}],{t,d:d||800,s:120});
-const slide=(sel,dx,dy,t,s)=>A(sel,[{opacity:0,transform:`translate(${dx}px,${dy}px)`},{opacity:1,transform:"translate(0,0)"}],{t,s:s??90,d:750});
-function countUp(id,to,t,dec=0){ const el=document.getElementById(id); if(!el)return; const fin=to.toLocaleString("en-US",{maximumFractionDigits:dec}).replace("-","−"); if(reduce){el.textContent=fin;return;}
-  const t0=performance.now()+t; el.textContent="0"; const tick=now=>{ const k=Math.min(1,Math.max(0,(now-t0)/700)); el.textContent=k<1?Math.round(to*k).toLocaleString("en-US").replace("-","−"):fin; if(k<1&&document.body.contains(el))requestAnimationFrame(tick); }; requestAnimationFrame(tick); }
-const mk=(id,c)=>`<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(${c})"/></marker>`;
-const MK=`<defs>${mk("ah","--ink")}${mk("ahs","--server")}${mk("ahc","--client")}${mk("ahm","--muted")}</defs>`;
-const svg=(h,inner,label)=>`<svg viewBox="0 0 800 ${h}" role="img" aria-label="${label}">${MK}${inner}</svg>`;
-const tile=(x,y,w,h,txt,cls,extra="")=>`<g class="${cls}"><rect class="anim ${extra}" x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="currentColor" fill-opacity=".12" stroke="currentColor" stroke-width="2"/><text class="anim mono ${extra}" x="${x+w/2}" y="${y+h/2+5}" text-anchor="middle" font-size="15" fill="currentColor">${txt}</text></g>`;
-const lock=(x,y,cls="c-client")=>`<g class="${cls} lock anim"><rect x="${x}" y="${y+7}" width="14" height="11" rx="2" fill="currentColor"/><path d="M${x+3},${y+8} v-3 a4,4 0 0 1 8,0 v3" fill="none" stroke="currentColor" stroke-width="2"/></g>`;
-const lbl=(x,y,t,o="")=>`<text x="${x}" y="${y}" font-size="13" fill="currentColor" ${o}>${t}</text>`;
-const small=(x,y,t,o="")=>`<text x="${x}" y="${y}" font-size="11.5" fill="currentColor" class="c-muted" ${o}>${t}</text>`;
-
-/* ---------------- scenes ---------------- */
 const steps=[
 { key:"Example", who:"both", whoT:"the task", at:0, lv:4, scale:"—", err:()=>0,
   title:"One neuron of an LLM",
@@ -426,28 +241,9 @@ const steps=[
       "The decrypted value, true answer and polynomial value side by side, with a log-scale bar chart showing the approximation error is thousands of times bigger than the encryption noise."); },
   play(){ pop(".big",0,250); A(".eb",[{transform:"scaleX(0)",transformOrigin:"left"},{transform:"scaleX(1)",transformOrigin:"left"}],{t:900,s:300,d:900}); },
   math:()=>`<div class="formula">decode(c₀ + c₁·s) = ${f(R.vy,6)}</div><p>The encryption noise (${fe(Math.abs(R.vy-R.poly))}) is set by Δ and grows slowly. The approximation error (${fe(Math.abs(R.poly-R.relu))}) is set by how well a polynomial imitates ReLU. Model-preserving frameworks in the SoK spend most of their effort on the second number.</p>`
-},
-{ key:"At a glance", who:"both", whoT:"summary", at:0, lv:1, scale:"—", err:()=>Math.abs(R.vy-R.relu),
-  title:"CKKS at a glance",
-  cap:()=>`Every lesson ends with this card, filled in for the same neuron, so schemes can be compared line by line.`,
-  html:true,
-  scene(){ return `<dl class="glance">
-    <dt>A slot holds</dt><dd>An approximate real number, scaled by Δ</dd>
-    <dt>Values per ciphertext</dt><dd>N/2: 2 here, 32,768 in practice</dd>
-    <dt>Native operations</dt><dd>Add, multiply, rotate</dd>
-    <dt>Linear part</dt><dd>One plaintext multiply, one rotate-and-add, one add. Packing makes it cheap per value.</dd>
-    <dt>ReLU</dt><dd>Polynomial approximation. Inexact, and deep if you want accuracy.</dd>
-    <dt>Noise</dt><dd>Never removed, kept below the precision</dd>
-    <dt>Depth used</dt><dd>3 levels</dd>
-    <dt>Refresh</dt><dd>Bootstrapping, the most expensive operation</dd>
-    <dt>Our neuron gives</dt><dd class="mono">${f(R.vy)} for a true ${f(R.relu)}</dd>
-    <dt>Security</dt><dd>Ring-LWE, post-quantum</dd></dl>
-    <div class="next"><div><b>BFV / BGV</b><br>Exact integers: z comes out exactly, but ReLU is even harder.</div><div><b>TFHE</b><br>One value per ciphertext, but ReLU is exact by lookup table.</div><div><b>Paillier</b><br>Additions only: the linear part works, ReLU does not.</div><div><b>Gentry–Lee</b><br>Encrypts whole matrices, so rotate-and-add disappears.</div></div>`; },
-  play(){ A(".glance dd",[{opacity:0,transform:"translateX(-10px)"},{opacity:1,transform:"none"}],{s:60,d:400}); A(".next div",[{opacity:0,transform:"translateY(10px)"},{opacity:1,transform:"none"}],{t:700,s:120}); },
-  math:()=>`<p>Toy parameters: N = 4, Δ = 2²⁰, levels q = 2³⁰, 2⁵⁰, 2⁷⁰, 2⁹⁰. Real CKKS LLM inference uses N = 2¹⁶, a modulus of about 1,500 bits split into ~60-bit primes, and bootstraps every few layers.</p>`
-}];
+}
+];
 
-/* ---------------- long explanations (under the figure) ---------------- */
 const EXPLAIN=[
 ()=>`<p>Private inference has two parties. The <b class="c-client">client</b> has private data, here a token embedding x. The <b class="c-server">server</b> has a model it does not want to give away, here the weights w and bias b of one neuron.</p>
 <p>The neuron does the two kinds of work every Transformer layer does:</p>
@@ -491,37 +287,19 @@ const EXPLAIN=[
 <li><b>Paillier</b> can do the linear part with additions only and cannot do ReLU at all.</li>
 <li><b>Gentry–Lee</b> encrypts whole matrices, so the rotate-and-add step disappears.</li></ul>`
 ];
-/* ---------------- controller ---------------- */
-let cur=0, timer=null;
-const chips=$("chips");
-steps.forEach((s,i)=>{ const b=document.createElement("button"); b.className="chip"; b.type="button"; b.innerHTML=`<b>${i}</b>${s.key}`; b.onclick=()=>go(i); chips.appendChild(b); });
-function status(s){
-  $("s-dot").style.left=`calc(${s.at*100}% - ${s.at*14}px)`;
-  [...$("s-lv").children].forEach((c,i)=>c.classList.toggle("gone",i>=s.lv));
-  $("s-scale").textContent=s.scale; const e=s.err(); $("s-err").textContent=e?fe(e):"0";
-}
-function go(i,keepPlay){
-  cur=Math.max(0,Math.min(steps.length-1,i)); const s=steps[cur];
-  if(!keepPlay) stop();
-  $("st-title").textContent=s.title; const w=$("st-who"); w.className="who "+s.who; w.textContent=s.whoT;
-  $("scene").innerHTML=s.scene(); $("st-cap").innerHTML=s.cap(); $("mathbody").innerHTML=s.math(); $("explainbody").innerHTML=EXPLAIN[cur]();
-  [...chips.children].forEach((c,j)=>{ c.setAttribute("aria-current",j===cur?"step":"false"); c.classList.toggle("done",j<cur); });
-  $("prev").disabled=cur===0; $("next").disabled=cur===steps.length-1;
-  status(s); s.play();
-  try{ localStorage.setItem("ckks-step",cur); history.replaceState(null,"","#step-"+cur); }catch(e){}
-}
-function stop(){ if(timer){ clearInterval(timer); timer=null; $("play").textContent="▶ Auto-play"; } }
-$("prev").onclick=()=>go(cur-1); $("next").onclick=()=>go(cur+1); $("replay").onclick=()=>go(cur,!!timer);
-$("play").onclick=()=>{ if(timer){stop();return;} if(cur===steps.length-1) go(0); $("play").textContent="❚❚ Pause"; timer=setInterval(()=>{ if(cur>=steps.length-1){stop();return;} go(cur+1,true); },6500); };
-document.addEventListener("keydown",e=>{ if(e.target.tagName==="INPUT")return; if(e.key==="ArrowRight")go(cur+1); if(e.key==="ArrowLeft")go(cur-1); });
-const recompute=()=>{ compute(); go(cur,!!timer); };
-["in-x1","in-x2"].forEach(id=>$(id).addEventListener("change",recompute));
-$("reseed").onclick=()=>{ seed=Math.floor(Math.random()*1e9); keygen(); recompute(); };
-$("theme").onclick=()=>{ const r=document.documentElement; const d=r.dataset.theme?r.dataset.theme==="dark":matchMedia("(prefers-color-scheme: dark)").matches; r.dataset.theme=d?"light":"dark"; };
-keygen(); compute();
-let start=0; try{ start=+localStorage.getItem("ckks-step")||0; }catch(e){}
-const hm=/^#step-(\d+)$/.exec(location.hash); if(hm) start=+hm[1];
-go(start);
+
+const cfg={ id:"ckks", title:"CKKS Step by Step", compute, setup:()=>C.keygen(),
+  inputNote:"Change x and every ciphertext is recomputed. Keep |z| ≤ 1 so ReLU stays accurate.",
+  status:{budgetLabel:"Levels left", budgetCells:4, scaleLabel:"Scale"},
+  footer:'Real toy CKKS in your browser: N = 4, Δ = 2²⁰, q = 2⁹⁰ with levels at 2³⁰, 2⁵⁰, 2⁷⁰, 2⁹⁰, key-switching modulus 2¹⁰⁰. Insecure sizes, real algebra. Scheme: Cheon, Kim, Kim, Song, <a href="https://eprint.iacr.org/2016/421">ASIACRYPT 2017</a>.',
+  cardResult:()=>`${f(R.vy)} for a true ${f(R.relu)}`,
+  steps };
+steps.forEach((s,i)=>{ s.budget=s.lv; s.explain=EXPLAIN[i]; });
+steps.push(LS.cardStep(cfg,{budget:1,scale:"—",err:()=>Math.abs(R.vy-R.relu),name:"CKKS",
+  extra:()=>`<div class="next"><div><b>CKKS variants</b><br>RNS, real-only slots, safer decryption and faster bootstrapping.</div><div><b>BFV / BGV</b><br>Exact integers: z comes out exactly, but ReLU is far deeper.</div><div><b>TFHE</b><br>One value per ciphertext, but ReLU is exact by lookup table.</div><div><b>Gentry–Lee</b><br>Encrypts whole matrices, so rotate-and-add disappears.</div></div>`,
+  math:()=>`<p>Toy parameters: N = 4, Δ = 2²⁰, levels q = 2³⁰, 2⁵⁰, 2⁷⁰, 2⁹⁰. Real CKKS LLM inference uses N = 2¹⁶, a modulus of about 1,500 bits split into ~60-bit primes, and bootstraps every few layers.</p>`,
+  explain:EXPLAIN[8]}));
+LS.start(cfg);
 })();
 </script>
 </body>
