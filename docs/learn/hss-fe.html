@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HSS and Functional Encryption</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lesson.css">
+</head>
+<body>
+<div id="app"></div>
+<script src="lessons.js"></script>
+<script src="cards/hss-fe.js"></script>
+<script src="lesson.js"></script>
+<script src="engines/sha256.js"></script>
+<script src="engines/mpc.js"></script>
+<script src="engines/ipfe.js"></script>
+<script>
+(function(){
+"use strict";
+const {svg,tile,lbl,small,pop,fade,draw,slide,blink,f,fe}=LS;
+const M=MPC, h8=v=>(v>>>0).toString(16).padStart(8,"0"), sg=M.signed, AUC="c-ok", P1C="c-muted";
+const dn=v=>{ const s=v.toString(); return s.length>9?s.slice(0,4)+"…"+s.slice(-4):s; };
+let R;
+function compute(inp){
+  const X=[Math.round(inp.x1*10),Math.round(inp.x2*10)], xt=[X[0],X[1],1], wt=[2,-1,4], zt=X[0]*2-X[1]+4;
+  const st=IPFE.setup(3), C=IPFE.encrypt(st.mpk,xt), sk=IPFE.keygen(st.msk,wt), D=IPFE.decrypt(C,sk,wt);
+  const leak=[[1,0,0],[0,1,0]].map(y=>IPFE.decrypt(C,IPFE.keygen(st.msk,y),y).z);
+  // HSS for linear functions from additive sharing
+  const shx=X.map(M.share), out=[0,1].map(b=>M.add(M.add(M.mul(2,shx[0][b]),M.mul(M.U(-1),shx[1][b])),b===0?4:0));
+  // distributed discrete log (DDH-based HSS share conversion)
+  const m=BigInt(Math.min(Math.abs(zt),200)), a=IPFE.rq(), h1=IPFE.pw(IPFE.g,a), h0=h1*IPFE.pw(IPFE.g,m)%IPFE.p;
+  const w0=IPFE.walk(h0), w1=IPFE.walk(h1), ok=w0.i!==null&&w1.i!==null&&(w1.i-w0.i)===Number(m);
+  const span=(w1.i??0)+30, marks=[]; let hh=h1; for(let k=0;k<=span;k++){ if(IPFE.dist(hh)) marks.push(k); hh=hh*IPFE.g%IPFE.p; }
+  R={X,xt,wt,zt,x:[inp.x1,inp.x2],st,C,sk,D,z:D.z,zv:D.z/40,y:Math.max(0,D.z)/40,relu:Math.max(0,zt)/40,leak,shx,out,hz:sg(M.open(out)),m:Number(m),a,h0,h1,w0,w1,ok,marks,span};
+  return R;
+}
+const box=(x,y,w,h,cls,title,sub)=>`<g class="${cls}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="9" fill="currentColor" fill-opacity=".07" stroke="currentColor" stroke-width="2"/><text x="${x+12}" y="${y+22}" font-size="13" font-weight="700" fill="currentColor">${title}</text>${sub?`<text x="${x+12}" y="${y+40}" font-size="11.5" fill="currentColor" class="c-muted">${sub}</text>`:""}</g>`;
+const mk=c=>c==="c-ok"?"ahk":c==="c-muted"?"ahm":c==="c-client"?"ahc":c==="c-server"?"ahs":c==="c-warn"?"ahw":"ahn";
+const arr=(x1,y1,x2,y2,cls,label,lx,ly)=>`<g class="${cls} msg"><line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="currentColor" stroke-width="2" marker-end="url(#${mk(cls)})"/>${label?`<text x="${lx}" y="${ly}" font-size="12" text-anchor="middle" fill="currentColor">${label}</text>`:""}</g>`;
+
+const steps=[
+{ key:"Example", who:"both", whoT:"the task", at:0, budget:"—", scale:"×10, ×4, ×40", err:()=>"exact",
+  title:"Two different ideas: let the server learn z, or let two servers work alone",
+  cap:()=>`Functional encryption lets one server decrypt exactly w·x + b = ${R.zt}/40 and nothing else. Homomorphic secret sharing lets two servers compute on shares without talking to each other.`,
+  scene(){ return svg(320,`
+    <g class="c-muted"><line x1="400" y1="20" x2="400" y2="300" stroke="currentColor" stroke-dasharray="4 6"/></g>
+    ${lbl(30,34,"FUNCTIONAL ENCRYPTION","font-weight=\"700\"")}
+    ${box(30,60,140,70,"c-client","Client","encrypts x")}${box(240,60,140,70,"c-server","Server","holds key for w")}
+    ${box(135,190,140,70,AUC,"Key authority","issues sk_w")}
+    ${arr(174,95,236,95,"c-client","Enc(x)",205,86)}${arr(250,186,300,136,AUC,"sk_w",292,170)}
+    <g class="c-warn"><text x="310" y="152" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">learns z = ${f(R.zt/40,2)}</text></g>
+    ${lbl(430,34,"HOMOMORPHIC SECRET SHARING","font-weight=\"700\"")}
+    ${box(430,60,140,70,"c-client","Client","shares x")}
+    ${box(430,200,140,70,AUC,"Server A","local work")}${box(630,200,140,70,P1C,"Server B","local work")}
+    ${arr(500,134,500,196,"c-client","",0,0)}${arr(540,134,676,196,"c-client","",0,0)}
+    ${small(600,296,"no messages between A and B",'text-anchor="middle"')}`,
+    "Left: a client encrypts x, a key authority gives the server a key for w, and the server learns z. Right: a client shares x to two servers who compute without talking."); },
+  play(){ pop("g.c-client,g.c-server,g.c-ok,g.c-muted",0,80); fade(".msg",600,150); },
+  math:()=>`<div class="formula">x̃ = (x₁·10, x₂·10, 1) = (${R.xt.join(", ")}),   w̃ = (2, −1, 4)</div><div class="formula">⟨x̃, w̃⟩ = ${R.zt} = 40·z</div><p>The bias becomes a third coordinate with x̃₃ = 1, so the whole linear part is one inner product.</p>`,
+  explain:()=>`<p>The two primitives in this lesson sit at opposite ends of the design space.</p>
+<p><b>Functional encryption (FE)</b> gives the server a key that decrypts one specific function of the encrypted data and nothing else. For an inner product, the server learns exactly w·x + b. It can then compute ReLU in the clear, because it now knows z. That is far more than FHE reveals, and it is the price of making the non-linear step trivial.</p>
+<p><b>Homomorphic secret sharing (HSS)</b> keeps the input hidden from both servers but lets them compute locally, with no rounds between them. Linear functions are easy. Products need the cryptographic trick shown at the end.</p>` },
+{ key:"Setup", who:"both", whoT:"authority", at:0.5, budget:"—", scale:"Z_p*, 41-bit p", err:()=>"exact",
+  title:"Inner-product FE: master key and public key",
+  cap:()=>`The authority picks three secret exponents s₁, s₂, s₃ (one per coordinate) and publishes hᵢ = g^{sᵢ} in a prime-order group.`,
+  scene(){ const row=(i,y)=>`<g class="r">${lbl(60,y,"s"+LS.sub(i+1),'font-weight="700"')}<g class="${AUC}"><text x="110" y="${y}" font-size="13" class="mono" fill="currentColor">${R.st.msk[i]}</text></g><text x="380" y="${y}" font-size="13" fill="currentColor">→</text>${lbl(420,y,"h"+LS.sub(i+1)+" = g^{s"+LS.sub(i+1)+"}",'font-weight="700"')}<g class="c-server"><text x="560" y="${y}" font-size="13" class="mono" fill="currentColor">${R.st.mpk[i]}</text></g></g>`;
+    return svg(260,`
+      <g class="${AUC}"><text x="60" y="40" font-size="13" font-weight="700" fill="currentColor">master secret key (authority only)</text></g><g class="c-server"><text x="420" y="40" font-size="13" font-weight="700" fill="currentColor">public key (everyone)</text></g>
+      ${row(0,90)}${row(1,130)}${row(2,170)}
+      ${small(60,222,"p = "+IPFE.p+" = 2q + 1 (a safe prime), q = "+IPFE.q+", g = 4 generates the order-q subgroup")}`,
+      "Three secret exponents held by the key authority map to three public group elements."); },
+  play(){ fade(".r",0,200); },
+  math:()=>`<div class="formula">msk = (s₁, s₂, s₃) ∈ Z_q³,   mpk = (g^{s₁}, g^{s₂}, g^{s₃}) mod p</div><p>Security rests on the decisional Diffie–Hellman assumption in this group. A 41-bit group is a toy; real deployments use 256-bit elliptic curves, or the LWE-based variant for post-quantum security.</p>`,
+  explain:()=>`<p>This is the DDH-based scheme of Abdalla, Bourse, De Caro and Pointcheval (PKC 2015). Its structure is ElGamal encryption run once per coordinate with one shared randomness.</p>
+<p>There is a new party: a key authority that holds the master secret and decides which functions may be decrypted. In inference this could be the client itself, issuing one key per linear layer of the model it is willing to have evaluated, or a third party trusted by both sides.</p>` },
+{ key:"Encrypt", who:"client", whoT:"client", at:0, budget:"—", scale:"Z_p*", err:()=>"exact",
+  title:"The client encrypts x̃",
+  cap:()=>`With one random r: ct₀ = g^r and ctᵢ = hᵢ^r · g^{x̃ᵢ}. Each ctᵢ hides x̃ᵢ behind the one-time mask hᵢ^r.`,
+  scene(){ return svg(240,`
+    ${lbl(60,40,"randomness r","font-weight=\"700\"")}<g class="c-client"><text x="220" y="40" font-size="13" class="mono" fill="currentColor">${R.C.r}</text></g>
+    ${lbl(60,90,"ct₀ = g^r","font-weight=\"700\"")}<g class="c-client"><text x="220" y="90" font-size="13" class="mono" fill="currentColor">${R.C.ct0}</text></g>
+    ${R.C.ct.map((c,i)=>`<g class="r">${lbl(60,130+i*36,"ct"+LS.sub(i+1)+" = h"+LS.sub(i+1)+"^r · g^"+R.xt[i],'font-weight="700"')}<g class="c-client"><text x="260" y="${130+i*36}" font-size="13" class="mono" fill="currentColor">${c}</text></g></g>`).join("")}`,
+    "The client's ciphertext: one random element and three masked coordinates."); },
+  play(){ fade(".r",0,180); },
+  math:()=>`<div class="formula">ct₀ = g^r,   ctᵢ = hᵢ^r · g^{x̃ᵢ} = g^{sᵢ r + x̃ᵢ}</div><p>The message sits in the exponent, so it must be small enough to recover by a short search at the end.</p>`,
+  explain:()=>`<p>Encryption puts each coordinate in the exponent of g and masks it with hᵢ^r = g^{sᵢ r}. Without the master secret these values are indistinguishable from random group elements, under DDH.</p>
+<p>Note what the client has not done: it has not said which function will be computed. The same ciphertext can be decrypted with keys for different w, which is exactly the risk shown two steps later.</p>` },
+{ key:"Key", who:"both", whoT:"authority → server", at:1, budget:"—", scale:"Z_q", err:()=>"exact",
+  title:"A functional key for w̃ is a single number",
+  cap:()=>`sk_w = s₁·2 + s₂·(−1) + s₃·4 mod q = ${R.sk}. With it, the server can compute ⟨x̃, w̃⟩ and nothing else.`,
+  scene(){ return svg(220,`
+    ${box(40,40,220,120,AUC,"Key authority","computes ⟨s, w̃⟩ mod q")}
+    ${box(540,40,220,120,"c-server","Server","receives sk_w")}
+    ${arr(264,100,534,100,AUC,"sk_w = "+R.sk,400,90)}
+    ${small(400,190,"w̃ = (2, −1, 4) is public; the key reveals nothing about s on its own",'text-anchor="middle"')}`,
+    "The key authority sends the server one number, the functional key for the weight vector."); },
+  play(){ slide(".msg",-80,0,0,0); },
+  math:()=>`<div class="formula">sk_w = Σ sᵢ·w̃ᵢ mod q = ${R.sk}</div>`,
+  explain:()=>`<p>The key is the inner product of the master secret with the weights. It is one exponent, no matter how long the vectors are. Keys for different weight vectors are different linear combinations of the same secret, which is why handing out many keys is dangerous.</p>` },
+{ key:"Decrypt", who:"server", whoT:"server", at:1, budget:"—", scale:"÷ 40", err:()=>Math.abs(R.y-R.relu)<1e-12?"exact":Math.abs(R.y-R.relu),
+  title:"The server decrypts z and applies ReLU in the clear",
+  cap:()=>`Π ctᵢ^{w̃ᵢ} / ct₀^{sk_w} = g^{${R.z}}. A short search finds the exponent after ${R.D.steps} steps: 40·z = ${R.z}. ReLU is then ordinary arithmetic: y = <b>${f(R.y)}</b>.`,
+  scene(){ const X0=60, X1=740, lo=-20, hi=20, sx=k=>X0+(k-lo)/(hi-lo)*(X1-X0);
+    let g=`${lbl(40,34,"Π ctᵢ^{w̃ᵢ} / ct₀^{sk} = ","font-weight=\"700\"")}<g class="c-server"><text x="250" y="34" font-size="13" class="mono" fill="currentColor">${R.D.gz}  = g^?</text></g>`;
+    g+=`<line x1="${X0}" y1="110" x2="${X1}" y2="110" stroke="currentColor" opacity=".35"/>`;
+    for(let k=lo;k<=hi;k++){ const hit=k===R.z; g+=`<g class="${hit?"c-ok":"c-muted"} tk"><circle cx="${sx(k)}" cy="110" r="${hit?8:3.5}" fill="currentColor"/></g>`; if(k%5===0) g+=small(sx(k),136,String(k).replace("-","−"),'text-anchor="middle"'); }
+    g+=small(400,80,"try g^0, g^1, g^−1, g^2, … until one matches",'text-anchor="middle"');
+    if(R.z!==null && Math.abs(R.z)<=20) g+=`<g class="c-ok"><text x="${sx(R.z)}" y="96" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">${R.z}</text></g>`;
+    g+=`<g class="c-warn big"><text x="200" y="196" font-size="15" fill="currentColor">server now knows z = ${R.z}/40 = ${f(R.zv)}</text></g><g class="c-server big"><text x="200" y="226" font-size="15" fill="currentColor">ReLU in the clear: y = ${f(R.y)}</text></g>`;
+    return svg(250,g,"A number line of candidate exponents; the matching exponent 14 is highlighted, so the server learns z and applies ReLU itself."); },
+  play(){ fade(".tk",0,25); pop(".big",1100,250); },
+  math:()=>`<div class="formula">Π ctᵢ^{w̃ᵢ} / ct₀^{sk_w} = g^{Σ(sᵢ r + x̃ᵢ)w̃ᵢ − r Σ sᵢ w̃ᵢ} = g^{⟨x̃, w̃⟩} = ${R.D.gz}</div><div class="formula">discrete log by search: ${R.z} (${R.D.steps} tries)</div>`,
+  explain:()=>`<p>The masks cancel because sk_w is exactly the combination of secrets that the weighted product of the ciphertexts carries. What is left is g raised to the inner product.</p>
+<p>The answer sits in an exponent, so the server must take a discrete logarithm. That is only possible because the result is small: here a search over a few dozen candidates. Large or high-precision results would need baby-step giant-step tables, which limits FE to small integer outputs.</p>
+<p>The result is exact, and ReLU is free because the server sees z in the clear. This is the essential difference from FHE, secret sharing and garbled circuits, where nobody ever sees z.</p>` },
+{ key:"Leak", who:"server", whoT:"what leaks", at:1, budget:"—", scale:"—", err:()=>"exact",
+  title:"What the server learns, and what more keys reveal",
+  cap:()=>`An FHE server sees only ciphertexts. This server sees z. With two more keys, for (1,0,0) and (0,1,0), it decrypts x₁·10 = ${R.leak[0]} and x₂·10 = ${R.leak[1]}: the client's input itself.`,
+  scene(){ return svg(260,`
+    ${box(30,30,350,200,"c-ok","FHE server (lessons 1–16)","sees ciphertexts only")}
+    <g class="c-ok"><text x="50" y="100" font-size="13" fill="currentColor">x: hidden</text><text x="50" y="130" font-size="13" fill="currentColor">z: hidden</text><text x="50" y="160" font-size="13" fill="currentColor">y: hidden</text></g>
+    ${box(420,30,350,200,"c-warn","FE server, this lesson","sees what its keys allow")}
+    <g class="c-warn lk"><text x="440" y="100" font-size="13" fill="currentColor">z = ${f(R.zv)} (with sk_w)</text><text x="440" y="130" font-size="13" fill="currentColor">y = ${f(R.y)} (computed in the clear)</text><text x="440" y="160" font-size="13" font-weight="700" fill="currentColor">x = [${f(R.leak[0]/10,1)}, ${f(R.leak[1]/10,1)}] with keys for e₁, e₂</text></g>
+    ${small(440,200,"real decryptions of the same ciphertext with two extra keys")}`,
+    "Side by side: an FHE server learns nothing, while the functional-encryption server learns z, y, and with extra keys the input x itself."); },
+  play(){ pop("g.c-ok,g.c-warn",0,200); fade(".lk text",600,250); },
+  math:()=>`<div class="formula">sk for (1,0,0) → ${R.leak[0]},   sk for (0,1,0) → ${R.leak[1]}</div><p>Any n linearly independent keys for an n-dimensional input reveal the whole input. Real neural networks have far more neurons than input dimensions.</p>`,
+  explain:()=>`<p>FE reveals by design: each key reveals one inner product. A single layer of a real network has thousands of neurons, each with its own weight vector. A server holding keys for all of them learns far more inner products than the input has coordinates, and can solve for the input exactly.</p>
+<p>This is why the schemes table marks FE as leaking more than FHE. It fits settings where the revealed values are themselves acceptable to disclose, for example the final scores of a classifier. Partially encrypted ML (Ryffel et al., NeurIPS 2019) uses quadratic FE for one private layer and runs the rest in the clear.</p>` },
+{ key:"HSS linear", who:"server", whoT:"two servers", at:1, budget:"0 server rounds", scale:"mod 2³²", err:()=>"exact",
+  title:"HSS for linear functions: two servers, no messages",
+  cap:()=>`The client shares x between two servers. Each computes 2·x₁ − x₂ on its own shares, and server A adds the bias. Their outputs add up to <b>${R.hz}</b> = 40·z, with no communication between them.`,
+  scene(){ const col=(x,cls,b,name)=>`<g class="${cls} col"><text x="${x}" y="70" font-size="14" font-weight="700" fill="currentColor">${name}</text><text x="${x}" y="104" font-size="13" class="mono" fill="currentColor">x₁ share ${h8(R.shx[0][b])}</text><text x="${x}" y="130" font-size="13" class="mono" fill="currentColor">x₂ share ${h8(R.shx[1][b])}</text><text x="${x}" y="166" font-size="13" class="mono" fill="currentColor">2·x₁ − x₂ ${b===0?"+ 4":""} = ${h8(R.out[b])}</text></g>`;
+    return svg(260,`${col(60,AUC,0,"Server A")}${col(450,P1C,1,"Server B")}
+      <g class="c-client big"><rect x="250" y="196" width="300" height="44" rx="8" fill="currentColor" fill-opacity=".12" stroke="currentColor" stroke-width="2"/><text x="400" y="224" text-anchor="middle" font-size="15" class="mono" fill="currentColor">client adds outputs: ${R.hz} → ${f(R.hz/40)}</text></g>`,
+      "Each server applies the linear function to its own shares; the client adds the two outputs to get 14."); },
+  play(){ fade(".col",0,300); pop(".big",900); },
+  math:()=>`<div class="formula">out_A + out_B = 2(x₁ᴬ + x₁ᴮ) − (x₂ᴬ + x₂ᴮ) + 4 = ${R.hz}</div>`,
+  explain:()=>`<p>For linear functions, HSS is just additive secret sharing: each server applies the function to its share, and the outputs are shares of the result. That covers our linear part, but ReLU needs products and comparisons.</p>
+<p>What makes HSS different from MPC is the goal of no interaction at all between the servers, even for multiplications. Boyle, Gilboa and Ishai (CRYPTO 2016) achieved this for branching programs under DDH. Later schemes use LWE or Paillier-style assumptions. The key ingredient is the share-conversion step on the next page.</p>` },
+{ key:"HSS product", who:"server", whoT:"two servers", at:1, budget:"0 server rounds", scale:"Z_p*", err:()=>R.ok?"exact":"conversion failed",
+  title:"Turning multiplicative shares into additive ones without talking",
+  cap:()=>R.ok?`Server A holds g^{a+${R.m}}, server B holds g^a. Each steps forward until it hits a 'distinguished' group element. Both stop at the same one, after ${R.w0.i} and ${R.w1.i} steps: ${R.w1.i} − ${R.w0.i} = ${R.m}.`:`This time a distinguished point fell between the two starting points, so the servers stopped at different places. This happens with probability about ${R.m}/256 and is part of the scheme's error.`,
+  scene(){ const X0=60, X1=740, span=Math.max(R.span,1), sx=k=>X0+(k/span)*(X1-X0);
+    let g=small(40,34,"exponent offset from a (positions along g^a, g^{a+1}, g^{a+2}, …)");
+    g+=`<line x1="${X0}" y1="120" x2="${X1}" y2="120" stroke="currentColor" opacity=".35" stroke-width="2"/>`;
+    R.marks.forEach(k=>{ g+=`<g class="c-noise star"><polygon points="${sx(k)},106 ${sx(k)+4},116 ${sx(k)+14},117 ${sx(k)+6},124 ${sx(k)+9},134 ${sx(k)},128 ${sx(k)-9},134 ${sx(k)-6},124 ${sx(k)-14},117 ${sx(k)-4},116" fill="currentColor"/></g>`; });
+    const end1=R.w1.i??0, end0=(R.w0.i??0)+R.m;
+    g+=`<g class="${P1C} walk"><circle cx="${sx(0)}" cy="160" r="7" fill="currentColor"/><line x1="${sx(0)}" y1="160" x2="${sx(end1)-4}" y2="160" stroke="currentColor" stroke-width="3" marker-end="url(#ahm)"/><text x="${sx(0)}" y="184" font-size="12.5" fill="currentColor">server B starts at g^a: ${R.w1.i} steps</text></g>`;
+    g+=`<g class="${AUC} walk"><circle cx="${sx(R.m)}" cy="80" r="7" fill="currentColor"/><line x1="${sx(R.m)}" y1="80" x2="${sx(end0)-4}" y2="80" stroke="currentColor" stroke-width="3" marker-end="url(#ahk)"/><text x="${sx(R.m)}" y="64" font-size="12.5" fill="currentColor">server A starts at g^{a+${R.m}}: ${R.w0.i} steps</text></g>`;
+    g+=`<g class="${R.ok?"c-client":"c-warn"} big"><text x="400" y="232" text-anchor="middle" font-size="15" class="mono" fill="currentColor">${R.ok?`shares: A outputs −${R.w0.i}, B outputs ${R.w1.i}; sum = ${R.w1.i-R.w0.i}`:"different stopping points: conversion failed"}</text></g>`;
+    g+=small(400,258,"stars: group elements whose SHA-256 hash starts with a zero byte (about 1 in 256)",'text-anchor="middle"');
+    return svg(270,g,"Two walkers on a line of group elements start 14 apart and stop at the same distinguished point; the difference of their step counts is 14."); },
+  play(){ pop(".star",0,60); LS.growX(".walk line",500,200); pop(".big",1500); },
+  math:()=>`<div class="formula">h_A = g^{a+m},  h_B = g^a,  m = ${R.m}</div><div class="formula">A: ${R.w0.i} steps,  B: ${R.w1.i} steps  ⇒  i_B − i_A = ${R.w1.i!=null&&R.w0.i!=null?R.w1.i-R.w0.i:"—"}</div><p>Group: p = ${IPFE.p}. Distinguished point: first byte of SHA-256(h) is 0. Expected walk ≈ 256 steps; failure probability ≈ m/256.</p>`,
+  explain:()=>`<p>In DDH-based HSS, multiplying a shared value by an encrypted input leaves the two servers with group elements whose ratio is g^m, a multiplicative sharing of m. To continue computing they need additive shares of m, but neither can take a discrete log.</p>
+<p>The distributed discrete log trick: both servers walk forward through g^a, g^{a+1}, … until they reach an element that a public hash marks as special. Because their starting points differ by m steps, they usually stop at the same special element, and the difference of their step counts is exactly m. Each server outputs its step count, with opposite signs, as its additive share.</p>
+<p>It fails when a special element lies between the two starting points, which happens with probability about m divided by the average gap. That built-in error and the cost of long walks are why DDH-based HSS remains mostly theoretical for LLMs. The walk here is real; the earlier step that produced h_A and h_B from an encrypted input is described, not run.</p>` }
+];
+const cfg={ id:"hss-fe", title:"HSS and Functional Encryption", compute,
+  inputNote:"x is rounded to one decimal so that x × 10 is an integer.", reseedLabel:"New keys",
+  status:{budgetLabel:"Interaction", budgetCells:4, scaleLabel:"Working in", errLabel:"Error"},
+  footer:'Real toy inner-product FE (DDH variant) in the order-q subgroup of Z<sub>p</sub>*, p a 41-bit safe prime; linear HSS from additive sharing; and a real distributed discrete-log walk with SHA-256 distinguished points. Schemes: Abdalla, Bourse, De Caro, Pointcheval, <a href="https://eprint.iacr.org/2015/017">PKC 2015</a>; Boyle, Gilboa, Ishai, <a href="https://eprint.iacr.org/2016/585">CRYPTO 2016</a>.',
+  cardResult:()=>`${f(R.y)} exactly (true ${f(R.relu)}), but the server sees z`,
+  steps };
+steps.push(LS.cardStep(cfg,{name:"HSS and functional encryption",budget:"no rounds",err:()=>"exact",
+  explain:()=>`<p>FE trades secrecy of the intermediate value for simplicity: one key per function, exact results, ReLU in the clear. HSS keeps everything hidden from both servers and avoids server-to-server communication, but its products rely on share conversion that is slow and can fail. Neither is used for full LLM inference today; both mark the edges of what is possible without FHE's noise or MPC's rounds.</p>`}));
+LS.start(cfg);
+})();
+</script>
+</body>
+</html>

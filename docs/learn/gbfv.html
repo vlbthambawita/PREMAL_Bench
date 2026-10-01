@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Generalized BFV Step by Step</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lesson.css">
+</head>
+<body>
+<div id="app"></div>
+<script src="lessons.js"></script>
+<script src="cards/gbfv.js"></script>
+<script src="lesson.js"></script>
+<script src="engines/bfv.js"></script>
+<script>
+(function(){
+"use strict";
+const {svg,tile,lock,lbl,small,pop,fade,draw,slide,blink,growX,f,fe,big}=LS;
+const QB=160, b=256n;
+/* the three dial settings: t(X) = X^k − 256 on Z[X]/(X^4 + 1) */
+const SET=[{k:4,sx:10,sw:4,sb:40,name:"BFV",t:"257"},{k:2,sx:100,sw:100,sb:10000,name:"GBFV",t:"X² − 256"},{k:1,sx:10000,sw:10000,sb:100000000,name:"CLPX",t:"X − 256"}];
+let Es, Ebig, M, R;
+const bits=v=>LS.bits(v);
+function setup(){ Es=SET.map(s=>{ const E=GBFV.make({N:4,k:s.k,b,qBits:QB}); E.keygen(); return E; });
+  Ebig=GBFV.make({N:4,k:4,b:1n<<32n,qBits:QB}); Ebig.keygen(); M=MLWE.make({n:2,k:2,t:257n,qBits:40}); M.keygen(); }
+function neuronIn(E,s,x){ const X=x.map(v=>BigInt(Math.round(v*s.sx))), Wt=LS.W.map(v=>BigInt(Math.round(v*s.sw))), Bt=BigInt(Math.round(LS.B*s.sb));
+  const c1=E.encrypt(E.encodeConst(X[0])), c2=E.encrypt(E.encodeConst(X[1]));
+  const p1=E.mulPlain(c1,E.encodeConst(Wt[0])), p2=E.mulPlain(c2,E.encodeConst(Wt[1])), z=E.addPlain(E.add(p1,p2),E.encodeConst(Bt));
+  return {X,Wt,Bt,c1,c2,p1,p2,z,zi:X[0]*Wt[0]+X[1]*Wt[1]+Bt,b1:E.budget(c1),bz:E.budget(z)}; }
+function compute(inp){
+  const x=[inp.x1,inp.x2], nn=LS.neuron(x);
+  const runs=SET.map((s,i)=>{ const r=neuronIn(Es[i],s,x), d=Es[i].decrypt(r.z); return Object.assign(r,{dec:d,val:Number(d[0])/s.sb}); });
+  const C=runs[2], E=Es[2];
+  const big1=neuronIn(Ebig,{sx:10000,sw:10000,sb:100000000},x), bigDec=Ebig.toA(Ebig.decryptPoly(big1.z))[0];
+  const ma=M.encrypt([BigInt(Math.round(x[0]*10)),0n]), mb=M.encrypt([BigInt(Math.round(x[1]*10)),0n]);
+  const mz=M.addPlain(M.add(M.scal(ma,BigInt(Math.round(LS.W[0]*4))),M.scal(mb,BigInt(Math.round(LS.W[1]*4)))),[BigInt(Math.round(LS.B*40)),0n]);
+  R={x,nn,runs,C,E,m1:E.encodeConst(C.X[0]),m2:E.encodeConst(C.X[1]),mw1:E.encodeConst(C.Wt[0]),mw2:E.encodeConst(C.Wt[1]),
+     ph:E.phase(C.c1),tph:E.decryptPoly(C.c1),zpoly:E.decryptPoly(C.z),zdec:C.dec[0],
+     big1,bigDec,ma,mz,mzd:M.decrypt(mz),
+     bars0:C.c1.c[0].map(v=>Number(LS.mod(v,E.q)*1000n/E.q)/1000)};
+  return R;
+}
+const p10=n=>"10"+LS.sup(n);
+const steps=[
+{ key:"The dial", who:"both", whoT:"the idea", at:0, budget:"—", scale:"t(X) = X^k − 256", err:()=>0,
+  title:"One dial: many small slots or one huge slot",
+  cap:()=>`Replace BFV's number t by a polynomial t(X) = X^k − 256. With N = 4: k = 4 is ordinary BFV (4 slots mod 257), k = 2 gives 2 slots mod 65,537, k = 1 is CLPX: a single slot mod 2³² + 1.`,
+  scene(){ const col=(i,x)=>{ const s=SET[i], E=Es[i], n=E.k, w=(220-(n-1)*6)/n, pb=Math.log2(Number(E.p)).toFixed(1);
+      return `<g class="col">${lbl(x,40,s.name,'font-weight="700"')}${small(x,60,"t(X) = "+s.t)}
+        ${Array.from({length:n},(_,j)=>tile(x+j*(w+6),76,w,54,"",i===2?"c-client":"c-client")).join("")}
+        ${small(x,152,n+" slot"+(n>1?"s":"")+" · each mod "+E.p.toLocaleString("en-US"))}${small(x,172,"≈ "+pb+" bits per slot")}
+        ${small(x,192,"our neuron to "+(i===0?"1/40":i===1?"4 decimals":"8 decimals"))}</g>`; };
+    return svg(300,`${col(0,30)}${col(1,290)}${col(2,550)}
+      <g class="c-muted"><line x1="30" y1="226" x2="770" y2="226" stroke="currentColor" stroke-width="2" marker-end="url(#ahm)" marker-start="url(#ahm)"/></g>
+      ${small(30,250,"more slots (SIMD)")}${small(770,250,"more precision per slot",'text-anchor="end"')}
+      ${small(400,280,"all three share the same ring Z[X]/(X⁴ + 1) and the same ciphertexts; only t(X) changes",'text-anchor="middle"')}`,"Three settings of a dial: four small slots for BFV, two medium slots for GBFV and one huge slot for CLPX, trading parallelism for precision."); },
+  play(){ LS.A(".col",[{opacity:0,transform:"translateY(14px)"},{opacity:1,transform:"none"}],{s:250,d:550}); },
+  math:()=>`<div class="formula">Z[X]/(X⁴ + 1, X^k − b) ≅ Z_p[X]/(X^k − b),   p = b^(4/k) + 1</div><table class="nums"><thead><tr><th>k</th><th>t(X)</th><th>p</th><th>slots (roots of X^k ≡ 256)</th></tr></thead><tbody>${Es.map((E,i)=>`<tr><td>${E.k}</td><td>${SET[i].t}</td><td class="v">${E.p}</td><td class="v">${E.roots.length?E.roots.join(", "):"—"}</td></tr>`).join("")}</tbody></table>`,
+  explain:()=>`<p>BFV encrypts integers modulo a number t. Generalized BFV (Geelen–Vercauteren, EUROCRYPT 2025) allows a <b>polynomial</b> plaintext modulus t(X). Because X⁴ = −1 in the ring, the condition X^k = 256 forces 256^(4/k) = −1, so the plaintexts are integers modulo p = 256^(4/k) + 1.</p><p>That gives a dial. With k = 4, t(X) is the constant 257 and we are back to BFV with 4 slots. With k = 2 the modulus is the Fermat prime 65,537 with 2 slots, one of the paper's showcase parameters. With k = 1, t(X) = X − 256 is the CLPX scheme (Chen–Laine–Player–Xia, CT-RSA 2018): one slot that holds a 32-bit integer.</p><p>The total amount of information per ciphertext stays about the same. GBFV lets you choose how to split it, and, as step 4 shows, it also makes noise grow much more slowly than BFV with a large t.</p>`},
+{ key:"Encode", who:"client", whoT:"client", at:0, budget:"—", scale:"base-256 digits", err:()=>0,
+  title:"Encode a big integer as base-256 digits",
+  cap:()=>`For high precision we scale x by 10⁴: x₁ → ${R.C.X[0].toLocaleString("en-US")}. CLPX writes it in base 256 with small digits, m(X) = ${LS.poly.str(R.m1)}. Setting X = 256 gives the integer back.`,
+  scene(){ const dg=(y,m,name,val)=>`${lbl(40,y+28,name)}${m.map((d,i)=>`<g class="dg">${tile(210+i*110,y,100,44,big(d),"c-client")}</g>`).join("")}${small(660,y+28,"→ m(256) = "+Number(val).toLocaleString("en-US"))}`;
+    return svg(300,`${["X⁰ = 1","X¹ = 256","X² = 65,536","X³ = 16,777,216"].map((t,i)=>small(260+i*110,30,t,'text-anchor="middle"')).join("")}
+      ${dg(44,R.m1,"x₁ × 10⁴",R.C.X[0])}${dg(104,R.m2,"x₂ × 10⁴",R.C.X[1])}
+      <g class="c-server">${dg(164,R.mw1,"w₁ × 10⁴",R.C.Wt[0])}${dg(224,R.mw2,"w₂ × 10⁴",R.C.Wt[1])}</g>
+      ${small(40,290,"digits stay in (−128, 128], so the coefficients are small even though the numbers are large")}`,"Inputs and weights scaled by ten thousand are written as polynomials whose coefficients are base-256 digits; evaluating at 256 gives the integers."); },
+  play(){ pop(".dg",0,60); },
+  math:()=>`<div class="formula">${R.C.X[0]} = ${R.m1.map((d,i)=>big(d)+"·256"+LS.sup(i)).join(" + ")}</div><div class="formula">bias: 0.1 × 10⁸ = ${R.C.Bt.toLocaleString("en-US")} → m(X) = ${LS.poly.str(R.E.encodeConst(R.C.Bt))}</div><p>Since 256⁴ ≡ −1 (mod 2³² + 1), wrapping a digit past X³ is the same as the ring rule X⁴ = −1, so the encoding is consistent with polynomial multiplication.</p>`,
+  explain:()=>`<p>In CLPX the plaintext modulus is t(X) = X − 256, so a polynomial m(X) stands for the integer m(256) modulo 2³² + 1. Encoding an integer means writing it in base 256 with balanced digits between −128 and 128.</p><p>Small digits matter because the noise growth of a multiplication depends on the size of the plaintext coefficients, not on the size of the integer they represent. A 32-bit number costs about as much noise as an 8-bit number in BFV.</p><p>The scale 10⁴ keeps four decimals of x and w, and the bias is scaled by 10⁸ to match the products. The neuron's result will be z × 10⁸, an integer of about 25 bits, which fits easily in the 32-bit slot.</p>`},
+{ key:"Encrypt", who:"client", whoT:"client", at:0.5, budget:()=>`${R.C.b1} bits`, scale:"Δ(X) = q / (X − 256)", err:()=>0,
+  title:"Encrypt with a polynomial Δ",
+  cap:()=>`BFV multiplied by Δ = q/t. CLPX multiplies by the polynomial Δ(X) = q/(X − 256), whose coefficients fall by a factor 256 each. Decryption multiplies back by (X − 256) and rounds.`,
+  scene(){ const D=R.E.Dpoly;
+    return svg(310,`${lbl(40,30,"Δ(X) = round( q · (X − 256)⁻¹ )   with q = 2¹⁶⁰","font-weight=\"700\"")}
+      ${D.map((d,i)=>`<g class="dp">${tile(40+i*185,44,175,44,"−2^"+(Math.log2(Number(-d))).toFixed(1),"c-muted","",14)}</g>`).join("")}
+      ${["Δ₀","Δ₁","Δ₂","Δ₃"].map((t,i)=>small(127+i*185,104,t,'text-anchor="middle"')).join("")}
+      ${lbl(40,140,"ciphertext c₀ coefficients (look random)","font-weight=\"700\"")}
+      ${R.bars0.map((v,i)=>`<g class="c-client"><rect class="bar" style="transform-box:fill-box;transform-origin:bottom" x="${40+i*60}" y="${216-v*56}" width="44" height="${v*56+2}" rx="2" fill="currentColor" fill-opacity=".55"/></g>`).join("")}
+      ${lbl(330,140,"decrypt: round( (X − 256) · (c₀ + c₁·s) / q )","font-weight=\"700\"")}
+      ${R.tph.map((d,i)=>`<g class="tp">${tile(330+i*110,158,100,44,big(d),"c-client")}</g>`).join("")}
+      ${small(330,222,"= the digits of x₁ again → m(256) = "+R.E.decrypt(R.C.c1)[0].toLocaleString("en-US"))}
+      ${small(40,262,"fresh noise budget: "+R.C.b1+" bits (q/2 versus the noise multiplied by t(X))")}`,"The polynomial Delta has coefficients shrinking by 256 each; the ciphertext looks random; decryption multiplies by X minus 256 and rounds to recover the digits."); },
+  play(){ pop(".dp",0,90); LS.A(".bar",[{transform:"scaleY(.1)"},{transform:"scaleY(1.2)"},{transform:"scaleY(1)"}],{t:400,s:60,d:800}); pop(".tp",1100,90); },
+  math:()=>`<div class="formula">Δ(X) = [${R.E.Dpoly.map(v=>"−"+(-v).toString().slice(0,6)+"…").join(", ")}]</div><div class="formula">(X − 256)·Δ(X) ≈ q  (mod X⁴ + 1)</div><div class="formula">round((X − 256)·phase/q) = [${R.tph.map(big).join(", ")}]</div>`,
+  explain:()=>`<p>In BFV the message is multiplied by Δ = ⌊q/t⌋ so that t·Δ ≈ q. CLPX needs the same property with a polynomial: (X − 256)·Δ(X) ≈ q in the ring. Because (X − 256)·(X³ + 256X² + 256²X + 256³) = −(256⁴ + 1), the right Δ(X) is −q/(2³² + 1) times that polynomial, rounded.</p><p>Encryption is then the usual c₀ = pk₀·u + e₀ + Δ(X)·m(X). Decryption multiplies the phase by t(X) = X − 256, divides by q and rounds. The result is m(X) up to multiples of (X − 256), which do not change m(256).</p><p>The noise budget counts how far the noise, after being multiplied by t(X), is from q/2. Here it is ${R.C.b1} bits.</p>`},
+{ key:"Linear", who:"server", whoT:"server", at:1, budget:()=>`${R.C.bz} bits`, scale:"z × 10⁸", err:()=>0,
+  title:"The linear part with eight decimals",
+  cap:()=>`Enc(x₁)·w₁ + Enc(x₂)·w₂ + b decrypts to the digits [${R.zpoly.map(big).join(", ")}]. Evaluated at 256 that is <b>${R.zdec.toLocaleString("en-US")}</b>, so z = ${(Number(R.zdec)/1e8).toFixed(8)} exactly.`,
+  scene(){ const row=(y,m,name,val,cls)=>`${lbl(40,y+28,name)}<g class="${cls}">${m.map((d,i)=>tile(210+i*110,y,100,44,big(d),"c-client","",14)).join("")}</g>${small(660,y+28,"= "+Number(val).toLocaleString("en-US"))}`;
+    const E=R.E;
+    return svg(330,`${row(20,E.decryptPoly(R.C.p1),"Enc(x₁) · w₁",E.decrypt(R.C.p1)[0],"r1")}${row(80,E.decryptPoly(R.C.p2),"Enc(x₂) · w₂",E.decrypt(R.C.p2)[0],"r2")}
+      ${row(140,E.encodeConst(R.C.Bt),"+ b × 10⁸",R.C.Bt,"r3")}
+      <line x1="210" y1="198" x2="640" y2="198" stroke="currentColor" opacity=".4"/>
+      ${row(210,R.zpoly,"z × 10⁸",R.zdec,"r4")}
+      <g class="c-ok r4"><text x="40" y="300" font-size="14" fill="currentColor">z = ${(Number(R.zdec)/1e8).toFixed(8)}    true z = ${R.nn.z.toFixed(8)}</text></g>
+      ${small(470,300,"noise budget "+R.C.b1+" → "+R.C.bz+" bits")}`,"Decrypted digit polynomials of the two products, the bias and their sum, which evaluates to z times one hundred million."); },
+  play(){ LS.A(".r1,.r2,.r3",[{opacity:0,transform:"translateX(-16px)"},{opacity:1,transform:"none"}],{s:300,d:500}); pop(".r4",1200,0); },
+  math:()=>`<div class="formula">${R.C.X[0]}·${R.C.Wt[0]} + ${R.C.X[1]}·(${R.C.Wt[1]}) + ${R.C.Bt} = ${R.C.zi}</div><div class="formula">decrypted polynomial ${LS.poly.str(R.zpoly)} at X = 256 → ${R.zdec}</div><p>The digits of the result are not the canonical base-256 digits of the answer (they can exceed 128), but evaluating at 256 modulo 2³² + 1 always gives the right integer.</p>`,
+  explain:()=>`<p>Multiplying the encrypted digits of x₁ by the plaintext digit polynomial of w₁ multiplies the integers they stand for. The product has bigger digits, but noise grows only with the digit sizes. The budget fell just ${R.C.b1-R.C.bz} bits for the whole linear part.</p><p>The result is z × 10⁸ = ${R.zdec.toLocaleString("en-US")}, exact to eight decimals. Plain BFV with t = 257 could not even hold one product: 15,000 × 5,000 = 75,000,000 would wrap around many times.</p><p>CLPX has no SIMD: one ciphertext, one number. That is the price of the extreme end of the dial.</p>`},
+{ key:"Why not big t", who:"server", whoT:"comparison", at:1, budget:()=>`${R.C.bz} bits`, scale:"all exact", err:()=>0,
+  title:"Why not plain BFV with a huge t?",
+  cap:()=>`BFV with t = 2³² + 1 also computes 35,000,000, but its budget falls from ${R.big1.b1} to ${R.big1.bz} bits. CLPX keeps ${R.C.bz} of ${R.C.b1}. Small digits mean slow noise growth.`,
+  scene(){ const rows=[["BFV t = 257 (1/40)",R.runs[0]],["GBFV t = X² − 256 (10⁻⁴)",R.runs[1]],["CLPX t = X − 256 (10⁻⁸)",R.runs[2]],["BFV t = 2³² + 1 (10⁻⁸)",Object.assign({},R.big1,{dec:[R.bigDec],val:Number(R.bigDec)/1e8})]];
+    const sc=v=>v/160*330;
+    return svg(300,`${lbl(40,30,"setting (precision)","font-weight=\"700\"")}${lbl(290,30,"fresh → after linear part (noise budget, bits)","font-weight=\"700\"")}${lbl(690,30,"z","font-weight=\"700\"")}
+      ${rows.map((r,i)=>`<g class="rw">${lbl(40,74+i*52,r[0])}<g class="${i===3?"c-warn":"c-client"}"><rect x="290" y="${58+i*52}" width="${sc(r[1].b1)}" height="12" rx="2" fill="currentColor" opacity=".3"/><rect class="eb" x="290" y="${72+i*52}" width="${sc(r[1].bz)}" height="12" rx="2" fill="currentColor"/></g>${small(296+sc(r[1].b1),68+i*52,r[1].b1+"")}${small(296+sc(r[1].bz),83+i*52,r[1].bz+"")}${lbl(690,80+i*52,r[1].val.toFixed(i===0?3:8),'class="mono"')}</g>`).join("")}
+      ${small(40,282,"BFV with a huge t starts with a smaller budget (Δ = q/t is smaller) and loses more per multiplication (coefficients up to t/2)")}`,"Noise budget before and after the linear part for four settings; BFV with a huge plaintext modulus loses far more budget than CLPX for the same precision."); },
+  play(){ fade(".rw",0,150); growX(".eb",500,150); },
+  math:()=>`<table class="nums"><thead><tr><th>setting</th><th>p</th><th>budget fresh</th><th>after</th><th>result</th></tr></thead><tbody>${R.runs.map((r,i)=>`<tr><td>${SET[i].name} t = ${SET[i].t}</td><td class="v">${Es[i].p}</td><td class="v">${r.b1}</td><td class="v">${r.bz}</td><td class="v">${r.dec[0]}</td></tr>`).join("")}<tr><td>BFV t = 2³² + 1</td><td class="v">${Ebig.p}</td><td class="v">${R.big1.b1}</td><td class="v">${R.big1.bz}</td><td class="v">${R.bigDec}</td></tr></tbody></table>`,
+  explain:()=>`<p>Why not just take BFV with t = 2³² + 1? Two reasons, both visible in the chart. The message is multiplied by Δ = q/t, so a 33-bit t eats 33 bits of the modulus before any computation. And plaintext coefficients can be as large as t/2, so each multiplication by a weight multiplies the noise by up to 2³².</p><p>CLPX and GBFV avoid both. The number 2³² + 1 is built from t(X) = X − 256 with tiny coefficients, and digits stay below 128, so noise grows like an 8-bit BFV while computing on 32-bit numbers. The GBFV paper reports bootstrapping a ciphertext holding up to 8,192 elements modulo 2¹⁶ + 1 in about 2 seconds, and native bootstrapping already at ring dimension 2¹⁴ (cited figures).</p><p>For exact LLM inference this means high-precision integer arithmetic, for example 16- or 32-bit fixed point, at a noise cost close to 8-bit arithmetic.</p>`},
+{ key:"High precision", who:"both", whoT:"research", at:1, budget:()=>`${R.C.bz} bits`, scale:"any modulus p", err:()=>0, sim:true,
+  title:"High-precision exact FHE (2026)",
+  cap:()=>`Peikert, Zarchy and Zyskind (CRYPTO 2026) reach the same goal for <b>any</b> modulus p, even on plain LWE: error rates and growth of a small-precision scheme while computing on huge p.`,
+  scene(){ return svg(280,`${lbl(40,34,"Error growth per multiplication versus plaintext precision (schematic)","font-weight=\"700\"")}
+      <line x1="80" y1="230" x2="540" y2="230" stroke="currentColor" opacity=".5"/><line x1="80" y1="230" x2="80" y2="60" stroke="currentColor" opacity=".5"/>
+      ${small(310,256,"plaintext precision  log₂ p",'text-anchor="middle"')}${small(70,62,"noise",'text-anchor="end"')}${small(70,78,"bits",'text-anchor="end"')}
+      <g class="c-warn"><path class="cv" pathLength="1" stroke-dasharray="1" d="M80,220 L520,80" fill="none" stroke="currentColor" stroke-width="3"/><text x="520" y="66" text-anchor="end" font-size="13" fill="currentColor">classic BFV/BGV</text></g>
+      <g class="c-ok"><path class="cv" pathLength="1" stroke-dasharray="1" d="M80,220 C200,205 380,196 520,190" fill="none" stroke="currentColor" stroke-width="3"/><text x="520" y="178" text-anchor="end" font-size="13" fill="currentColor">CLPX / GBFV / PZZ</text></g>
+      <g class="c-muted"><rect x="590" y="90" width="190" height="110" rx="8" fill="none" stroke="currentColor" stroke-dasharray="4 4"/></g>
+      ${small(602,112,"Reported (PZZ, cited):")}${small(602,134,"• any integer modulus p")}${small(602,154,"• works on plain LWE")}${small(602,174,"• Z_(2⁶⁴) multiply: tens of ms")}${small(602,194,"• 4–5× more depth")}`,"Schematic: noise growth rises steeply with plaintext precision for classic schemes and stays almost flat for CLPX, GBFV and the new high-precision technique."); },
+  play(){ draw(".cv",0,1000); },
+  math:()=>`<p>This step is a schematic, not an encrypted computation. The bullet points quote the abstract of Peikert, Zarchy, Zyskind, “High-Precision Exact FHE Made Simple, General, and Fast” (<a href="https://eprint.iacr.org/2025/2321">ePrint 2025/2321</a>, CRYPTO 2026).</p>`,
+  explain:()=>`<p>CLPX and GBFV need a plaintext modulus of a special shape, like 256⁴ + 1 or a Fermat prime. Many applications want arithmetic modulo an arbitrary huge prime or modulo 2⁶⁴, which classic BFV/BGV handle badly: the noise of a fresh ciphertext and its growth under multiplication both scale with p.</p><p>Peikert, Zarchy and Zyskind give a general technique whose error behaves like a scheme with exponentially smaller precision, for any modulus and any ring, even unstructured LWE. Their prototype multiplies modulo 2⁶⁴ in tens of milliseconds and gains four to five times the multiplicative depth of classic schemes (figures from the paper).</p><p>For private inference this points to exact high-precision fixed-point layers without the slot loss of CLPX. We show it as a schematic because a faithful toy would need the paper's full gadget machinery.</p>`},
+{ key:"Module-LWE", who:"both", whoT:"variant", at:1, budget:"—", scale:"rank 2, degree 2", err:()=>0,
+  title:"ModHE: the same neuron on module lattices",
+  cap:()=>`ModHE replaces one degree-4 ring element by a vector of two degree-2 ones. The toy here encrypts 10·x₁, 10·x₂ and computes 2·Enc(${big(R.runs[0].X[0])}) − Enc(${big(R.runs[0].X[1])}) + 4 = <b>${big(R.mzd[0])}</b>.`,
+  scene(){ const cell=(x,y,v,cls)=>`<g class="${cls}"><rect x="${x}" y="${y}" width="46" height="30" rx="4" fill="currentColor" fill-opacity=".12" stroke="currentColor"/></g>`;
+    const grid=(x,y,rows,cols,cls,lab)=>{ let g=""; for(let r=0;r<rows;r++) for(let c=0;c<cols;c++) g+=cell(x+c*50,y+r*36,0,cls); return g+small(x,y-8,lab); };
+    return svg(320,`${lbl(40,30,"RLWE (BFV, CKKS): one ring of degree 4","font-weight=\"700\"")}
+      <g class="g1">${grid(40,62,1,4,"c-noise","a: 1 × 4 coefficients")}${grid(40,124,1,4,"c-client","s: 1 × 4 coefficients")}</g>
+      ${lbl(420,30,"MLWE (ModHE): rank 2, degree 2","font-weight=\"700\"")}
+      <g class="g2">${grid(420,62,2,2,"c-noise","a: 2 × 2 coefficients")}${grid(590,62,2,2,"c-client","s: 2 × 2 coefficients")}</g>
+      ${small(40,190,"same lattice dimension 4 in both; MLWE multiplies many small polynomials instead of one big one")}
+      ${lbl(40,232,"toy MLWE result: b = ["+R.mz.b.map(v=>LS.hex(v,M.q,4)).join(", ")+"],  decrypts to ["+R.mzd.map(big).join(", ")+"]",'class="mono"')}
+      ${small(40,256,"b + a₁·s₁ + a₂·s₂ = Δ·m + e,  with q = 2⁴⁰, t = 257")}
+      <g class="c-ok"><text x="40" y="288" font-size="14" fill="currentColor">40·z = ${big(R.mzd[0])} → z = ${f(Number(R.mzd[0])/40)} (linear part only)</text></g>`,"An RLWE secret is one polynomial of degree four; a module-LWE secret is a vector of two polynomials of degree two; both have dimension four."); },
+  play(){ fade(".g1",0); slide(".g2",-40,0,500); },
+  math:()=>`<div class="formula">ct = (b, a₁, a₂),  b = −(a₁s₁ + a₂s₂) + e + Δ·m  over Z_q[X]/(X² + 1)</div><div class="formula">2·Enc(${R.runs[0].X[0]}) − Enc(${R.runs[0].X[1]}) + 4 → decrypt [${R.mzd.map(big).join(", ")}]</div><p>Only additions and plaintext-scalar products are shown; ModHE also defines ciphertext multiplication with relinearization over the module.</p>`,
+  explain:()=>`<p>RLWE schemes get more security or depth only by doubling the ring degree N, which changes every hardware unit. ModHE (Mukherjee et al., TCHES 2024) uses Module-LWE, the problem behind the Kyber and Dilithium standards: the secret is a vector of k small-degree polynomials.</p><p>Depth or security can then grow by increasing the rank k while keeping the degree fixed, so the same polynomial multiplier is reused. The paper ports CKKS to this setting and notes the cost: more relinearization work.</p><p>The toy encrypts the integer inputs under a rank-2, degree-2 module and computes the linear part of our neuron exactly. It is a real encryption, at insecure sizes.</p>`}
+];
+const cfg={ id:"gbfv", title:"Generalized BFV Step by Step", compute, setup,
+  inputNote:"x is used to 4 decimals in the CLPX run (×10⁴) and to 1 decimal in the BFV run (×10).",
+  status:{budgetLabel:"Noise budget", scaleLabel:"Plaintext modulus", errLabel:"Error so far"},
+  footer:'Real toy GBFV in your browser: N = 4, t(X) = X^k − 256 for k = 4, 2, 1, q = 2¹⁶⁰; Module-LWE toy with rank 2, degree 2, q = 2⁴⁰. Insecure sizes, real algebra. Papers: CLPX (<a href="https://eprint.iacr.org/2017/809">CT-RSA 2018</a>), GBFV (<a href="https://eprint.iacr.org/2024/1587">EUROCRYPT 2025</a>), high-precision exact FHE (<a href="https://eprint.iacr.org/2025/2321">CRYPTO 2026</a>), ModHE (<a href="https://eprint.iacr.org/2023/895">TCHES 2024</a>).',
+  cardResult:()=>`z = ${(Number(R.zdec)/1e8).toFixed(8)} exact (ReLU not evaluated)`, steps };
+steps.push(LS.cardStep(cfg,{name:"Generalized BFV",budget:()=>`${R.C.bz} bits`,scale:"—",err:()=>0,
+  extra:()=>`<div class="next"><div><b>TFHE</b><br>Exact non-linear functions by lookup tables, one value at a time.</div><div><b>Scheme switching</b><br>Compute the linear part in one scheme and ReLU in another.</div></div>`,
+  math:()=>`<p>Toy parameters: N = 4, q = 2¹⁶⁰, b = 256. The GBFV paper uses N = 2¹⁴ to 2¹⁵ with plaintexts modulo 2¹⁶ + 1 and the Goldilocks prime 2⁶⁴ − 2³² + 1.</p>`,
+  explain:()=>`<p>GBFV turns the plaintext modulus into a design choice: many small exact slots, or few slots with huge exact precision, at low noise cost. A degree-(p − 1) interpolation for ReLU is hopeless for p ≈ 2³², so the non-linear part needs another tool, such as bootstrapping with lookup tables or switching to TFHE.</p>`}));
+LS.start(cfg);
+})();
+</script>
+</body>
+</html>

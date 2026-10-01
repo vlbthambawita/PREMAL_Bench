@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Threshold CKKS Step by Step</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lesson.css">
+</head>
+<body>
+<div id="app"></div>
+<script src="lessons.js"></script>
+<script src="cards/threshold.js"></script>
+<script src="lesson.js"></script>
+<script src="engines/ckks.js"></script>
+<script>
+(function(){
+"use strict";
+const {svg,tile,lock,keyIcon,lbl,small,arrow,pop,fade,draw,slide,blink,growX,f,fe,sup,big}=LS;
+const P_=LS.poly;
+const C=CKKS.make({N:4,deltaBits:20,q0Bits:30,levels:3,pBits:100}), q=C.q, D=C.D, N=4;
+const W=LS.W, B=LS.B, C0=0.09375, C1=0.5, C2=0.46875, FLOOD=256;
+const vec=fn=>Array.from({length:N},fn), maxAbs=a=>a.reduce((m,v)=>{ v=v<0n?-v:v; return v>m?v:m; },0n);
+let T={};
+function setup(){
+  const Q=q[3], PQ=C.P*Q;
+  let s1,s2; do{ s1=vec(()=>LS.tern()); s2=vec(()=>LS.tern()); }while(s1.every(v=>v===0n)||s2.every(v=>v===0n));
+  const s=P_.add(s1,s2,1n<<200n);
+  /* common reference string */
+  const a=vec(()=>LS.randBig(Q)), aRot=vec(()=>LS.randBig(PQ)), aRlk=vec(()=>LS.randBig(PQ));
+  /* public key shares (one round) */
+  const e1=vec(()=>LS.smallErr()), e2=vec(()=>LS.smallErr());
+  const p1=P_.add(P_.neg(P_.mul(a,s1,Q)),e1,Q), p2=P_.add(P_.neg(P_.mul(a,s2,Q)),e2,Q), pk0=P_.add(p1,p2,Q);
+  /* rotation key shares (one round) */
+  const rotShare=si=>P_.neg(P_.mul(aRot,si,PQ)).map((v,i)=>LS.cmod(v+LS.smallErr()+C.P*P_.auto(si,5)[i],PQ));
+  const r1=rotShare(s1), r2=rotShare(s2), rot=[P_.add(r1,r2,PQ),aRot];
+  /* relinearization key: two rounds */
+  const u1=vec(()=>LS.tern()), u2=vec(()=>LS.tern());
+  const h0i=(ui,si)=>P_.neg(P_.mul(ui,aRlk,PQ)).map((v,i)=>LS.cmod(v+C.P*si[i]+LS.smallErr(),PQ));
+  const h1i=si=>P_.mul(si,aRlk,PQ).map(v=>LS.cmod(v+LS.smallErr(),PQ));
+  const h0=P_.add(h0i(u1,s1),h0i(u2,s2),PQ), h1=P_.add(h1i(s1),h1i(s2),PQ);
+  const g0=si=>P_.mul(si,h0,PQ).map(v=>LS.cmod(v+LS.smallErr(),PQ));
+  const g1=(ui,si)=>P_.mul(P_.sub(ui,si,PQ),h1,PQ).map(v=>LS.cmod(v+LS.smallErr(),PQ));
+  const rlk=[P_.add(P_.add(g0(s1),g0(s2),PQ),P_.add(g1(u1,s1),g1(u2,s2),PQ),PQ),h1];
+  C.K={s, pk:[pk0,a], rlk, rot:{5:rot}, swk:null};
+  /* key-quality checks (these use both shares only to measure, never in the protocol) */
+  const pkErr=maxAbs(P_.add(pk0,P_.mul(a,s,Q),Q));
+  const rlkErr=maxAbs(P_.sub(P_.add(rlk[0],P_.mul(rlk[1],s,PQ),PQ),P_.scal(P_.mul(s,s,PQ),C.P,PQ),PQ));
+  const rotErr=maxAbs(P_.sub(P_.add(rot[0],P_.mul(rot[1],s,PQ),PQ),P_.scal(P_.auto(s,5),C.P,PQ),PQ));
+  T={s1,s2,s,a,p1,p2,pk0,pkErr,rlkErr,rotErr};
+}
+let R;
+function compute(inp){
+  const x=[inp.x1,inp.x2], n=LS.neuron(x), poly=C0+C1*n.z+C2*n.z*n.z;
+  const ct=C.encrypt(C.encode(x));
+  const c4=C.rescale(C.mulPt(ct,C.encode(W))), cz=C.addPt(C.add(c4,C.rotate(c4,1)),C.encode([B,B]));
+  const zz=C.rescale(C.mulCt(cz,cz)), t=C.rescale(C.mulPt(zz,C.cst(C2))), u=C.down(C.rescale(C.mulPt(cz,C.cst(C1)))), y=C.addPt(C.add(t,u),C.cst(C0));
+  const m=q[y.l];
+  const fl1=vec(()=>BigInt(LS.randInt(-FLOOD,FLOOD))), fl2=vec(()=>BigInt(LS.randInt(-FLOOD,FLOOD)));
+  const d1=P_.add(P_.mul(y.c[1],T.s1,m),fl1,m), d2=P_.add(P_.mul(y.c[1],T.s2,m),fl2,m);
+  const full=P_.add(P_.add(y.c[0],d1,m),d2,m), yv=C.decode(full);
+  const only1=C.decode(P_.add(y.c[0],d1,m)), only2=C.decode(P_.add(y.c[0],d2,m));
+  const noFlood=C.val(y)[0];
+  R={x,n,poly,z:C.val(cz)[0],yl:y.l,d1,d2,fl1,fl2,full,yv,only1,only2,noFlood,ct0:y.c[0]};
+  return R;
+}
+const box=(x,y,w,h,t,cls,sub)=>`<g class="${cls} bx"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8" fill="currentColor" fill-opacity=".08" stroke="currentColor" stroke-width="2"/><text x="${x+w/2}" y="${y+(sub?h/2-2:h/2+5)}" text-anchor="middle" font-size="13.5" font-weight="700" fill="currentColor">${t}</text>${sub?`<text x="${x+w/2}" y="${y+h/2+15}" text-anchor="middle" font-size="11.5" fill="currentColor" class="c-muted">${sub}</text>`:""}</g>`;
+const sTiles=(arr,x,y,cls,w=46)=>arr.map((v,i)=>tile(x+i*(w+6),y,w,36,big(v),cls,"",13)).join("");
+const hx=(v,m)=>LS.hex(v,m,4);
+const steps=[
+{ key:"Setting", who:"both", whoT:"the task", at:0.5, budget:4, scale:"—", err:()=>0,
+  title:"Two key holders, one shared key",
+  cap:()=>"The client and the model owner each hold half of the secret key. Encryption and computation work as usual, but decryption needs both halves, so neither party can read results alone.",
+  scene(){ let g=box(30,40,200,92,"Client","c-client","holds share s₁ and input x")+box(570,40,200,92,"Model owner","c-server","holds share s₂ and w, b");
+    g+=box(300,190,200,70,"Compute server","c-muted","sees only ciphertexts");
+    g+=`<g class="c-noise kk"><rect x="300" y="40" width="200" height="92" rx="8" fill="currentColor" fill-opacity=".1" stroke="currentColor" stroke-width="2" stroke-dasharray="6 4"/><text x="400" y="78" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">joint key s = s₁ + s₂</text><text x="400" y="100" text-anchor="middle" font-size="12" fill="currentColor">nobody ever holds it</text></g>`;
+    g+=arrow(232,86,296,86,"ahc","c-client")+arrow(568,86,504,86,"ahs","c-server");
+    g+=arrow(130,134,296,214,"ahc","c-client")+small(213,178,"Enc(x)",'text-anchor="middle" stroke="var(--panel)" stroke-width="5" paint-order="stroke"')+arrow(670,134,504,214,"ahs","c-server")+small(587,178,"plaintext w, b",'text-anchor="middle" stroke="var(--panel)" stroke-width="5" paint-order="stroke"');
+    g+=`<g class="c-muted"><path d="M400,262 C400,300 130,300 130,138" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#ahm)"/><path d="M400,262 C400,300 670,300 670,138" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#ahm)"/></g>`+small(400,316,"result goes to both, each adds a partial decryption",'text-anchor="middle"');
+    return svg(330,g,"Client and model owner each hold a key share; the compute server works on ciphertexts under the joint key and sends the result back for joint decryption."); },
+  play(){ pop(".bx",0,200); blink(".kk",600); fade("path",1000); },
+  math:()=>`<div class="formula">s = s₁ + s₂,   decryption: c₀ + c₁·s₁ + c₁·s₂ = Δm + e</div>`,
+  explain:()=>`<p>In Lesson 1 the client alone held the secret key. That suits private inference, but some settings need more. A hospital and a model vendor may want a result that only both together can open. A federation of data owners may want to compute on pooled data without any one of them able to decrypt it.</p>
+<p><b>Threshold FHE</b> (Asharov, Jain, López-Alt, Tromer, Vaikuntanathan, Wichs, EUROCRYPT 2012) splits the secret key into shares. Encryption and homomorphic evaluation are unchanged and use one joint public key. Decryption becomes a small protocol: each share holder publishes a partial decryption, and only all of them together, or any t of n in general, reveal the result.</p>
+<p>This lesson runs a two-party version of CKKS on the shared neuron. The client holds s₁ and the model owner holds s₂. The same toy engine as Lesson 1 does the computation.</p>`},
+
+{ key:"Joint pk", who:"both", whoT:"both parties", at:0, budget:4, scale:"—", err:()=>Number(T.pkErr),
+  title:"A joint public key from two shares",
+  cap:()=>`Each party publishes −a·sᵢ + eᵢ using a common random a. Adding the two shares gives a public key for s₁ + s₂, with combined noise of at most ${T.pkErr}. Nobody had to reveal a share.`,
+  scene(){ let g=small(30,30,"CLIENT SHARE s₁ (secret)")+`<g class="sh">${sTiles(T.s1,30,40,"c-client")}</g>`+small(470,30,"MODEL OWNER SHARE s₂ (secret)")+`<g class="sh">${sTiles(T.s2,470,40,"c-server")}</g>`;
+    g+=small(30,112,"published: p₁ = −a·s₁ + e₁")+`<g class="pb">${T.p1.map((v,i)=>tile(30+i*76,122,70,32,hx(v,q[3]),"c-client","",11)).join("")}</g>`;
+    g+=small(470,112,"published: p₂ = −a·s₂ + e₂")+`<g class="pb">${T.p2.map((v,i)=>tile(470+i*76,122,70,32,hx(v,q[3]),"c-server","",11)).join("")}</g>`;
+    g+=`<g class="c-muted"><path d="M180,158 C180,190 400,180 400,204 M620,158 C620,190 400,180 400,204" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#ahm)"/></g>`;
+    g+=small(400,178,"add",'text-anchor="middle"');
+    g+=small(250,222,"joint public key pk₀ = p₁ + p₂ = −a·(s₁ + s₂) + e₁ + e₂")+`<g class="jk">${T.pk0.map((v,i)=>tile(250+i*76,232,70,32,hx(v,q[3]),"c-noise","",11)).join("")}</g>`;
+    g+=`<g class="c-ok jk"><text x="400" y="294" text-anchor="middle" font-size="12.5" fill="currentColor">check: pk₀ + a·s has coefficients of size ≤ ${T.pkErr}, a valid public key</text></g>`;
+    return svg(306,g,"Each party's secret share produces a published public-key share; the two shares are added into one joint public key."); },
+  play(){ pop(".sh",0,150); slide(".pb",0,-30,500,200); pop(".jk",1300,150); },
+  math:()=>`<div class="formula">s₁ = ${P_.str(T.s1)},   s₂ = ${P_.str(T.s2)},   s = ${P_.str(T.s)}</div><div class="formula">pk = (p₁ + p₂, a),   p₁ + p₂ + a·s = e₁ + e₂ = [${P_.add(T.pk0,P_.mul(T.a,T.s,q[3]),q[3]).map(big).join(", ")}]</div>`,
+  explain:()=>`<p>A CKKS public key is (−a·s + e, a). Because it is linear in s, it can be built from shares. Both parties agree on a random a, for example by hashing a public seed. Each publishes its own share −a·sᵢ + eᵢ, and anyone can add the two.</p>
+<p>The result is exactly a public key for s = s₁ + s₂, with noise e₁ + e₂. The joint secret is never assembled anywhere, and each published share is an ordinary RLWE sample that hides its sᵢ.</p>
+<p>This is the first protocol of <b>multiparty HE</b> (Mouchet, Troncoso-Pastoriza, Bossuat, Hubaux, PETS 2021), implemented in Lattigo and OpenFHE. It takes one round, and with n parties the shares are simply summed.</p>`},
+
+{ key:"Eval keys", who:"both", whoT:"both parties", at:0, budget:4, scale:"—", err:()=>Number(T.rlkErr),
+  title:"Evaluation keys need one or two rounds",
+  cap:()=>`The rotation key is linear in s, so one round of shares suffices. The relinearization key encrypts s², which mixes the shares, so it takes two rounds. Both keys come out correct: their error is ${LS.bits(T.rotErr)} and ${LS.bits(T.rlkErr)} bits, far below the 100-bit special modulus.`,
+  scene(){ let g=lbl(30,40,"Rotation key: encrypts s(X⁵)","font-weight=\"700\"");
+    g+=box(30,56,200,58,"party i sends","c-muted","−a'·sᵢ + eᵢ + P·sᵢ(X⁵)")+arrow(232,85,288,85,"ahm")+box(292,56,140,58,"sum","c-noise","one round")+arrow(434,85,490,85,"ahm")+`<g class="c-ok rk">${keyIcon(510,85,"c-ok")}<text x="550" y="90" font-size="13" font-weight="700" fill="currentColor">rotation key ✓</text></g>`;
+    g+=lbl(30,160,"Relinearization key: encrypts s² = (s₁ + s₂)²","font-weight=\"700\"");
+    g+=box(30,176,170,58,"round 1","c-muted","h₀ᵢ, h₁ᵢ from uᵢ, sᵢ")+arrow(202,205,236,205,"ahm")+box(240,176,130,58,"sum","c-noise","h₀, h₁")+arrow(372,205,406,205,"ahm");
+    g+=box(410,176,170,58,"round 2","c-muted","sᵢ·h₀, (uᵢ − sᵢ)·h₁")+arrow(582,205,616,205,"ahm")+`<g class="c-ok rk">${keyIcon(636,205,"c-ok")}<text x="674" y="210" font-size="13" font-weight="700" fill="currentColor">rlk ✓</text></g>`;
+    g+=small(30,270,`Checked on the real keys: rotation key error ≈ 2${sup(LS.bits(T.rotErr))}, relinearization key error ≈ 2${sup(LS.bits(T.rlkErr))}, special modulus P = 2¹⁰⁰.`);
+    return svg(290,g,"The rotation key is built in one round of summed shares; the relinearization key needs two rounds, both giving valid keys."); },
+  play(){ pop(".bx",0,120); pop(".rk",900,400); },
+  math:()=>`<div class="formula">round 1:  h₀ᵢ = −uᵢ·a'' + P·sᵢ + e,   h₁ᵢ = sᵢ·a'' + e'</div><div class="formula">round 2:  h₀'ᵢ = sᵢ·h₀ + e'',   h₁'ᵢ = (uᵢ − sᵢ)·h₁ + e'''</div>
+    <div class="formula">rlk = (Σh₀'ᵢ + Σh₁'ᵢ,  h₁)   ⇒   rlk₀ + rlk₁·s = P·s² + small</div>
+    <table class="nums"><tbody><tr><td>rotation key error (max coefficient)</td><td class="v">${T.rotErr} (${LS.bits(T.rotErr)} bits)</td></tr><tr><td>relinearization key error</td><td class="v">${T.rlkErr} (${LS.bits(T.rlkErr)} bits)</td></tr></tbody></table>
+    <p>The checks use both shares only to measure key quality; the protocol itself never combines them.</p>`,
+  explain:()=>`<p>Rotation and conjugation keys are encryptions of s under a permuted s. Like the public key they are linear in s, so each party publishes its share and the shares are summed.</p>
+<p>The relinearization key is harder, because s² = s₁² + 2s₁s₂ + s₂² contains a cross term that neither party can compute alone. The two-round protocol of Mouchet et al. uses an ephemeral secret uᵢ from each party. In round 1 everyone publishes masked versions of uᵢ and sᵢ. In round 2 everyone multiplies the round-1 sums by its own secrets. The masks cancel when everything is added, leaving an encryption of P·s².</p>
+<p>The toy runs exactly these rounds with the random common values a, a', a''. The error check shows both keys are as good as single-party keys.</p>`},
+
+{ key:"Compute", who:"server", whoT:"server", at:1, budget:1, scale:"Δ", err:()=>Math.abs(R.noFlood-R.poly),
+  title:"Compute the neuron exactly as in Lesson 1",
+  cap:()=>`The client encrypts x under the joint public key. The server multiplies by w, rotates, adds b and evaluates the ReLU polynomial using the joint keys. Nothing about the computation knows the key is shared.`,
+  scene(){ const st=[["Enc(x)","joint pk","c-client"],["× w, rescale","L3 → L2","c-server"],["rotate + add + b","rotation key","c-server"],["p(z), relinearize","rlk, L2 → L0","c-server"],["Enc(y)","to both parties","c-noise"]];
+    let g=""; st.forEach((s,i)=>{ const x=20+i*156; g+=box(x,60,140,64,s[0],s[2],s[1]); if(i<4) g+=arrow(x+142,92,x+152,92,"ahm"); });
+    g+=small(400,170,"same toy engine, same levels, same polynomial p(z) = 0.09375 + 0.5z + 0.46875z²",'text-anchor="middle"');
+    g+=`<g class="c-muted"><text x="400" y="200" text-anchor="middle" font-size="12.5" fill="currentColor">ciphertext of y, c₀ = [${R.ct0.map(v=>hx(v,q[R.yl])).join(", ")}]</text></g>`;
+    return svg(220,g,"Pipeline of the neuron under the joint key: encrypt, multiply by weights, rotate and add, evaluate the polynomial, output an encrypted y."); },
+  play(){ pop(".bx",0,180); },
+  math:()=>`<div class="formula">z (measured with the joint key for checking) = ${f(R.z,6)},   p(z) = ${f(R.poly,6)}</div>`,
+  explain:()=>`<p>Homomorphic evaluation only uses the public key and the evaluation keys. Because those are valid keys for s = s₁ + s₂, the computation of Lesson 1 runs unchanged: one plaintext multiplication, one rotation and the degree-2 ReLU polynomial with one relinearization.</p>
+<p>This is the main appeal of threshold CKKS. The expensive part, evaluation, costs exactly the same as single-key CKKS. Only key generation and decryption change, and they are cheap.</p>`},
+
+{ key:"Joint dec", who:"both", whoT:"both parties", at:0, budget:1, scale:"Δ", err:()=>Math.abs(R.yv[0]-R.poly),
+  title:"Partial decryptions plus flooding noise",
+  cap:()=>`Each party computes c₁·sᵢ and adds fresh flooding noise before publishing it. Adding both shares to c₀ decrypts to ${f(R.yv[0],5)}. The flooding hides each party's share (Lesson 2) and costs about ${fe(Math.abs(R.yv[0]-R.noFlood))} of precision.`,
+  scene(){ let g=box(300,24,200,54,"c₀ (public)","c-muted",R.ct0.slice(0,2).map(v=>hx(v,q[R.yl])).join(", ")+", …");
+    g+=small(30,112,"CLIENT: d₁ = c₁·s₁ + flood₁")+`<g class="pd">${R.d1.map((v,i)=>tile(30+i*76,122,70,32,hx(v,q[R.yl]),"c-client","",11)).join("")}</g>`;
+    g+=small(470,112,"OWNER: d₂ = c₁·s₂ + flood₂")+`<g class="pd">${R.d2.map((v,i)=>tile(470+i*76,122,70,32,hx(v,q[R.yl]),"c-server","",11)).join("")}</g>`;
+    g+=small(30,176,"flood₁ = ["+R.fl1.map(big).join(", ")+"]")+small(470,176,"flood₂ = ["+R.fl2.map(big).join(", ")+"]");
+    g+=`<g class="c-muted"><path d="M180,190 C180,220 400,206 400,232 M620,190 C620,220 400,206 400,232 M400,80 V232" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#ahm)"/></g>`;
+    g+=`<g class="res">${tile(270,236,260,50,"y = "+f(R.yv[0],6),"c-ok","",16)}</g>`;
+    g+=small(540,258,"p(z) = "+f(R.poly,6))+small(540,276,"without flooding: "+f(R.noFlood,6));
+    return svg(300,g,"The public c0 and two partial decryptions with flooding noise are added to give the decrypted y."); },
+  play(){ pop(".bx",0); slide(".pd",0,-30,400,150); pop(".res",1400); },
+  math:()=>`<div class="formula">c₀ + d₁ + d₂ = c₀ + c₁·(s₁ + s₂) + flood₁ + flood₂ = Δ·y + e + flood</div>
+    <table class="nums"><tbody><tr><td>decrypted y</td><td class="v">${f(R.yv[0],8)}</td></tr><tr><td>without flooding</td><td class="v">${f(R.noFlood,8)}</td></tr><tr><td>flooding range per party</td><td class="v">±${FLOOD} (Δ = 2²⁰)</td></tr></tbody></table>`,
+  explain:()=>`<p>Decryption needs c₁·s, and c₁·s = c₁·s₁ + c₁·s₂. Each party computes its own product and publishes it. Anyone who sees both, together with c₀, can decode y.</p>
+<p>Without protection, a published c₁·sᵢ would reveal sᵢ just like the attack in Lesson 2, because c₁ is public. Each party therefore adds <b>flooding noise</b> that is large compared with the CKKS noise. The sum of floods slightly blurs the result, here by a few ×10⁻⁴, and real systems choose larger Δ so the blur stays below the needed precision.</p>
+<p>The result is also given to both parties here. If only the client should learn y, the model owner sends its partial decryption to the client alone.</p>`},
+
+{ key:"One share", who:"both", whoT:"one party", at:0, budget:1, scale:"Δ", err:()=>"unreadable",
+  title:"One share alone reveals nothing",
+  cap:()=>`With only one partial decryption, the "result" is ${f(R.only1[0],0)} for the client and ${f(R.only2[0],0)} for the model owner. Both are random-looking numbers, because the other half of c₁·s is missing.`,
+  scene(){ const bars=[["client alone",R.only1[0],"c-client"],["owner alone",R.only2[0],"c-server"],["both together",R.yv[0],"c-ok"]];
+    const mx=Math.max(...bars.map(b=>Math.abs(b[1])),1); const X0=400, half=330;
+    let g=`<line x1="${X0}" y1="30" x2="${X0}" y2="230" stroke="currentColor" opacity=".35"/>`+small(X0,246,"0",'text-anchor="middle"');
+    bars.forEach((b,i)=>{ const y=56+i*64, w=Math.max(3,Math.abs(b[1])/mx*half); const x=b[1]<0?X0-w:X0;
+      g+=small(30,y-6,b[0])+`<g class="${b[2]}"><rect class="eb" x="${x}" y="${y}" width="${w}" height="30" rx="3" fill="currentColor" fill-opacity=".7" style="transform-box:fill-box;transform-origin:${b[1]<0?"right":"left"}"/><text x="${b[1]<0?X0+10:x+w+8}" y="${y+20}" font-size="13" font-weight="700" fill="currentColor">${b[1]<0?"−":""}${Math.abs(b[1])<10?f(Math.abs(b[1]),4):Math.round(Math.abs(b[1])).toLocaleString("en-US")}</text></g>`; });
+    g+=small(400,272,"decoded slot 1 (same scale for all three bars)",'text-anchor="middle"');
+    return svg(286,g,"Bars of the decoded value: huge random numbers with one share, and the tiny correct value with both shares."); },
+  play(){ LS.A(".eb",[{transform:"scaleX(0)"},{transform:"scaleX(1)"}],{s:300,d:800}); },
+  math:()=>`<table class="nums"><tbody><tr><td>c₀ + d₁ (client alone)</td><td class="v">${R.only1.map(v=>f(v,2)).join(", ")}</td></tr><tr><td>c₀ + d₂ (owner alone)</td><td class="v">${R.only2.map(v=>f(v,2)).join(", ")}</td></tr><tr><td>c₀ + d₁ + d₂</td><td class="v">${R.yv.map(v=>f(v,6)).join(", ")}</td></tr></tbody></table>`,
+  explain:()=>`<p>c₀ + c₁·s₁ is missing c₁·s₂, a polynomial with uniformly random-looking coefficients of size about q. Decoding it gives numbers of the order of q/Δ, here hundreds or thousands, with no relation to y.</p>
+<p>This is the security property threshold schemes provide: any set of parties below the threshold learns nothing. With two parties the threshold is both. With n parties and Shamir-style shares, any t of them can decrypt and any t − 1 learn nothing.</p>`},
+
+{ key:"Variants", who:"both", whoT:"research", at:0.5, budget:1, scale:"—", err:()=>"—",
+  title:"From two parties to t-out-of-n",
+  cap:()=>"Additive shares need everyone. Shamir shares let any t of n parties decrypt. Recent work makes the shares and flooding cheaper, which matters most for large groups.",
+  scene(){ const items=[["2012","AJLTVW threshold FHE","t-of-n decryption for LWE-based FHE","EUROCRYPT 2012"],["2018","Boneh et al.","universal thresholdizer from threshold FHE","CRYPTO 2018"],["2021","Multiparty HE (MHE)","practical BFV/CKKS protocols, in Lattigo","PETS 2021"],["2025","Low-communication ThFHE","short decryption shares from Module-LWE","ASIACRYPT 2025"],["2025","Ajax","fast threshold FHEW without flooding","USENIX Sec. 2026"],["2026","Shamir for ThFHE, revisited","smaller ciphertexts for many parties","CCS 2026"]];
+    let g=`<line x1="110" y1="24" x2="110" y2="${24+items.length*44-20}" stroke="currentColor" stroke-width="2" opacity=".4"/>`;
+    items.forEach((it,i)=>{ const y=32+i*44; g+=`<g class="ev"><text x="92" y="${y+5}" text-anchor="end" font-size="12" class="mono c-muted" fill="currentColor">${it[0]}</text><circle cx="110" cy="${y}" r="6" fill="var(--noise)"/><text x="130" y="${y+2}" font-size="13.5" font-weight="700" fill="currentColor">${it[1]}</text><text x="130" y="${y+18}" font-size="12" fill="currentColor" class="c-muted">${it[2]}</text><text x="770" y="${y+5}" text-anchor="end" font-size="12" fill="currentColor" class="c-muted">${it[3]}</text></g>`; });
+    return svg(290,g,"Timeline of threshold and multiparty FHE work from 2012 to 2026."); },
+  play(){ LS.A(".ev",[{opacity:0,transform:"translateX(-10px)"},{opacity:1,transform:"none"}],{s:120,d:500}); },
+  math:()=>`<p>Cited from the papers listed on the schemes table; nothing on this step is computed.</p>`,
+  explain:()=>`<p>The two-party additive version shown here generalizes in two directions. With n additive shares, all n parties must cooperate. With Shamir secret sharing of s, any t of n can decrypt. Lattice keys live in a ring, though, and Shamir reconstruction over rings introduces factors that grow with n, which forces larger parameters. The CCS 2026 paper revisits exactly that cost.</p>
+<p>Flooding is the other cost. Partial decryptions need noise much larger than the scheme's noise, which means bigger moduli. Ajax (USENIX Security 2026) avoids flooding for FHEW-style schemes, and the ASIACRYPT 2025 work keeps decryption shares short.</p>
+<p>For private LLM inference, threshold CKKS is a natural fit when the model owner must also approve every decryption, or when several data owners pool private context.</p>`}
+];
+const cfg={ id:"threshold", title:"Threshold CKKS Step by Step", compute, setup,
+  inputNote:"Change x to rerun the computation. New keys reruns all key-generation protocols.",
+  status:{budgetLabel:"Levels left", budgetCells:4, scaleLabel:"Scale"},
+  footer:'Real toy two-party CKKS: N = 4, Δ = 2²⁰, q = 2⁹⁰, P = 2¹⁰⁰. Public, rotation and two-round relinearization keys are generated from shares; decryption uses partial decryptions with ±256 flooding noise. Papers: <a href="https://eprint.iacr.org/2011/613">AJLTVW</a>, <a href="https://eprint.iacr.org/2020/304">MHE</a>, <a href="https://eprint.iacr.org/2017/956">Boneh et al.</a>.',
+  cardResult:()=>`${f(R.yv[0],4)} for a true ${f(R.n.relu,4)} (needs both shares)`,
+  steps };
+steps.push(LS.cardStep(cfg,{name:"Threshold CKKS",budget:1,err:()=>Math.abs(R.yv[0]-R.n.relu)}));
+LS.start(cfg);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Garbled Circuits Step by Step</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lesson.css">
+</head>
+<body>
+<div id="app"></div>
+<script src="lessons.js"></script>
+<script src="cards/garbled.js"></script>
+<script src="lesson.js"></script>
+<script src="engines/sha256.js"></script>
+<script src="engines/gc.js"></script>
+<script>
+(function(){
+"use strict";
+const {svg,tile,lbl,small,pop,fade,draw,slide,blink,f,fe}=LS;
+const hx=GC.hex, lsb=v=>Number(v&1n), bitsOf=(v,n)=>Array.from({length:n},(_,i)=>(v>>i)&1);
+let R, Delta;
+function setup(){ Delta=GC.newDelta(); }
+function compute(inp){
+  const X=[Math.round(inp.x1*10),Math.round(inp.x2*10)], zt=X[0]*2-X[1]+4, z5=((zt%32)+32)%32;
+  const s=LS.randInt(0,31), c=((z5-s)%32+32)%32;
+  const circuit=GC.reluCircuit(), inputs=[0,1,2,3,4].flatMap(i=>[`s${i}`,`c${i}`]);
+  const G=GC.garble(circuit,inputs,Delta);
+  const K={}; for(let i=0;i<5;i++) K[`s${i}`]=GC.label(G,`s${i}`,(s>>i)&1);
+  const ots=[]; for(let i=0;i<5;i++){ const b=(c>>i)&1, m0=GC.label(G,`c${i}`,0), m1=GC.label(G,`c${i}`,1); const o=GC.otRun(m0,m1,b); ots.push({i,b,m0,m1,...o,ok:o.got===(b?m1:m0)}); K[`c${i}`]=o.got; }
+  const ev=GC.evaluate(circuit,G.tables,{...K});
+  const dec=[0,1,2,3].map(i=>lsb(G.L[`y${i}`])), yb=[0,1,2,3].map(i=>lsb(ev.K[`y${i}`])^dec[i]), y=yb.reduce((a,b,i)=>a+(b<<i),0);
+  const zs=z5>=16?z5-32:z5, relu=Math.max(0,zs);
+  const nAND=circuit.filter(g=>g.op==="AND").length, nXOR=circuit.filter(g=>g.op==="XOR").length, nNOT=circuit.filter(g=>g.op==="NOT").length;
+  const bytes={tables:nAND*4*8, labels:5*8, dec:1, ot:5*48+8*0}; bytes.total=bytes.tables+bytes.labels+bytes.dec+bytes.ot;
+  const gy0=G.tables.find(t=>t.gate.out==="y0");
+  R={X,zt,z5,zs,s,c,circuit,G,K,ots,ev,dec,yb,y,yv:y/40,relu:relu/40,trueRelu:Math.max(0,zt)/40,nAND,nXOR,nNOT,bytes,gy0,x:[inp.x1,inp.x2]};
+  return R;
+}
+const bitRow=(x,y,bits,cls,lab,w=34)=>`${small(x-10,y+22,lab,'text-anchor="end"')}${bits.slice().reverse().map((b,k)=>`<g class="${cls} bt"><rect x="${x+k*(w+6)}" y="${y}" width="${w}" height="32" rx="5" fill="currentColor" fill-opacity="${b?.5:.08}" stroke="currentColor" stroke-width="2"/><text x="${x+k*(w+6)+w/2}" y="${y+21}" text-anchor="middle" font-size="14" class="mono" fill="currentColor">${b}</text></g>`).join("")}`;
+const andGate=(x,y,cls,id="")=>`<g class="${cls} gate"><path d="M${x},${y} h16 a16,16 0 0 1 0,32 h-16 z" fill="var(--panel)" stroke="currentColor" stroke-width="2"/><text x="${x+13}" y="${y+21}" text-anchor="middle" font-size="9" fill="currentColor">${id}</text></g>`;
+const bytesStr=n=>n+" B";
+
+const steps=[
+{ key:"Example", who:"both", whoT:"the task", at:0, budget:"0 B", scale:"5-bit integers", err:()=>"exact",
+  title:"ReLU as a boolean circuit on shared bits",
+  cap:()=>`After the linear part, 40·z = ${R.zt} arrives split mod 32 between the server (${R.s}) and the client (${R.c}). A garbled circuit computes ReLU of their sum without either side seeing it.`,
+  scene(){ return svg(300,`
+    ${bitRow(160,40,bitsOf(R.s,5),"c-server","server share s = "+R.s)}
+    ${bitRow(160,96,bitsOf(R.c,5),"c-client","client share c = "+R.c)}
+    ${small(160,26,"bit 4 (sign) … bit 0")}
+    <line x1="160" y1="144" x2="354" y2="144" stroke="currentColor" stroke-width="1.5"/>${small(364,148,"+ mod 32")}
+    <g class="c-muted"><rect x="155" y="160" width="205" height="44" rx="6" fill="none" stroke="currentColor" stroke-dasharray="5 4"/></g>
+    ${bitRow(160,166,bitsOf(R.z5,5),"c-ok","z = "+R.zs+" (nobody sees)")}
+    ${LS.arrow(380,182,470,182,"ahk","c-ok")}
+    <g class="c-ok relu"><rect x="480" y="150" width="130" height="64" rx="8" fill="var(--panel)" stroke="currentColor" stroke-width="2.5"/><polyline points="500,200 540,200 588,164" fill="none" stroke="currentColor" stroke-width="3"/></g>
+    ${LS.arrow(614,182,690,182,"ahc","c-client")}
+    <g class="c-client relu"><text x="740" y="190" text-anchor="middle" font-size="22" class="mono" fill="currentColor">${R.y}</text></g>${small(740,214,"y (client learns)",'text-anchor="middle"')}
+    ${small(160,256,"In hybrid protocols (Gazelle, Delphi, CrypTFlow2) the linear part uses HE or secret sharing,")}${small(160,274,"and a garbled circuit handles the non-linear part.")}`,
+    "The server's and client's 5-bit shares add to z = 14; a garbled ReLU circuit outputs y to the client."); },
+  play(){ pop(".bt",0,40); pop(".relu",900,200); },
+  math:()=>`<div class="formula">40·z = ${R.X[0]}·2 + ${R.X[1]}·(−1) + 4 = ${R.zt};   in 5-bit two's complement: ${R.z5.toString(2).padStart(5,"0")}</div><div class="formula">s + c = ${R.s} + ${R.c} = ${R.s+R.c} ≡ ${R.z5} (mod 32)</div><p>Five bits hold −16 to 15. Inputs that push 40·z outside this range wrap around.</p>`,
+  explain:()=>`<p>Garbled circuits, Yao's 1986 idea, compute any boolean circuit between two parties. One party, the garbler, encrypts the circuit. The other, the evaluator, runs it on encrypted wire values and learns only the output.</p>
+<p>Here the server garbles and the client evaluates. The input is 40·z, already split between them by an earlier linear layer, as in Gazelle and Delphi. The circuit first adds the two 5-bit shares, then applies ReLU bit by bit.</p>
+<p>Unlike CKKS, nothing is approximated. A circuit computes ReLU exactly. The costs are communication, because every AND gate becomes a small table that must be sent, and interaction, because the client must obtain its input labels by oblivious transfer.</p>` },
+{ key:"Circuit", who:"both", whoT:"public", at:0.5, budget:"0 B", scale:"gates", err:()=>"exact",
+  title:"The ReLU circuit",
+  cap:()=>`A 5-bit adder, then yᵢ = zᵢ AND NOT z₄. In total ${R.nAND} AND gates, ${R.nXOR} XOR gates and ${R.nNOT} NOT gate. Only AND gates will cost anything.`,
+  scene(){ const ys=[60,110,160,210];
+    let g=`<g class="c-muted"><rect x="150" y="40" width="190" height="270" rx="10" fill="var(--panel)" stroke="currentColor" stroke-width="2"/></g>
+      <text x="245" y="160" text-anchor="middle" font-size="15" font-weight="700" fill="currentColor">5-bit adder</text>${small(245,182,"z = s + c mod 32",'text-anchor="middle"')}${small(245,202,(R.nAND-4)+" AND, "+R.nXOR+" XOR",'text-anchor="middle"')}`;
+    for(let i=0;i<5;i++){ g+=`<g class="c-server"><line x1="90" y1="${54+i*12}" x2="148" y2="${54+i*12}" stroke="currentColor" stroke-width="1.5"/></g><g class="c-client"><line x1="90" y1="${200+i*12}" x2="148" y2="${200+i*12}" stroke="currentColor" stroke-width="1.5"/></g>`; }
+    g+=`<g class="c-server"><text x="80" y="82" text-anchor="end" font-size="13" fill="currentColor">s₄…s₀</text></g><g class="c-client"><text x="80" y="228" text-anchor="end" font-size="13" fill="currentColor">c₄…c₀</text></g>`;
+    ys.forEach((y,i)=>{ g+=`<g class="c-ok wire"><line x1="340" y1="${y}" x2="560" y2="${y}" stroke="currentColor" stroke-width="2"/></g>${small(352,y-6,"z"+LS.sub(i))}`+andGate(560,y-8,"c-server","AND")+`<g class="c-ok wire"><line x1="592" y1="${y+8}" x2="660" y2="${y+8}" stroke="currentColor" stroke-width="2" marker-end="url(#ahk)"/></g><g class="c-client"><text x="668" y="${y+13}" font-size="14" font-weight="700" fill="currentColor">y${LS.sub(i)}</text></g>`; });
+    g+=`<g class="c-warn wire"><line x1="340" y1="280" x2="420" y2="280" stroke="currentColor" stroke-width="2"/><polygon points="420,268 420,292 444,280" fill="var(--panel)" stroke="currentColor" stroke-width="2"/><circle cx="449" cy="280" r="5" fill="var(--panel)" stroke="currentColor" stroke-width="2"/>
+      <line x1="454" y1="280" x2="500" y2="280" stroke="currentColor" stroke-width="2"/><line x1="500" y1="280" x2="500" y2="68" stroke="currentColor" stroke-width="2"/>`;
+    ys.forEach(y=>{ g+=`<line x1="500" y1="${y+16}" x2="560" y2="${y+16}" stroke="currentColor" stroke-width="2"/><circle cx="500" cy="${y+16}" r="3" fill="currentColor"/>`; });
+    g+=`</g>${small(352,274,"z₄ (sign)")}<g class="c-warn"><text x="470" y="304" font-size="12" fill="currentColor">NOT z₄</text></g>`;
+    g+=small(560,300,"AND gates (purple): each becomes a 4-row table");
+    return svg(330,g,"Circuit diagram: server and client bits enter a 5-bit adder producing z0 to z4; z4 is inverted and ANDed with z0 to z3 to give the ReLU output bits y0 to y3."); },
+  play(){ fade(".wire",0,60); pop(".gate",500,120); },
+  math:()=>`<div class="formula">carryᵢ₊₁ = carryᵢ ⊕ ((sᵢ ⊕ carryᵢ) ∧ (cᵢ ⊕ carryᵢ)),   zᵢ = sᵢ ⊕ cᵢ ⊕ carryᵢ</div><div class="formula">yᵢ = zᵢ ∧ ¬z₄   (i = 0 … 3)</div><p>Gate count: ${R.nAND} AND, ${R.nXOR} XOR, ${R.nNOT} NOT. With the free-XOR technique, XOR and NOT gates need no table.</p>`,
+  explain:()=>`<p>Any function on bits can be written as a circuit of AND, XOR and NOT gates. ReLU on a two's-complement number is simple: if the sign bit is 1, output zero; otherwise output the number. That is one NOT and four ANDs.</p>
+<p>The adder in front is needed because the input arrives as two shares. Adding them is mostly XORs, plus one AND per carry.</p>
+<p>The circuit itself is public. Only the wire values are secret. Real ReLU circuits for 32- or 64-bit fixed point have a few hundred AND gates, and a Transformer layer has millions of non-linear elements, which is why garbled circuits are usually reserved for the non-linear parts.</p>` },
+{ key:"Labels", who:"server", whoT:"garbler", at:1, budget:"0 B", scale:"64-bit labels", err:()=>"exact",
+  title:"Every wire gets two random labels",
+  cap:()=>`For each wire the server picks a random label for 0 and sets the label for 1 to label₀ ⊕ Δ. The last bit (the colour) is random, so a label hides its bit.`,
+  scene(){ const wires=["s0","c0","z4","y0"], names={s0:"s₀",c0:"c₀",z4:"z₄",y0:"y₀"};
+    const row=(w,i)=>{ const y=78+i*52, L0=R.G.L[w], L1=L0^R.G.Delta; return `<g class="lrow">${lbl(40,y+5,"wire "+names[w],'font-weight="700"')}<g class="c-server"><text x="170" y="${y+5}" class="mono" font-size="13" fill="currentColor">${hx(L0).slice(0,15)}<tspan class="c-warn" font-weight="700">${hx(L0).slice(15)}</tspan></text><text x="420" y="${y+5}" class="mono" font-size="13" fill="currentColor">${hx(L1).slice(0,15)}<tspan class="c-warn" font-weight="700">${hx(L1).slice(15)}</tspan></text></g><text x="650" y="${y+5}" class="mono" font-size="13" fill="currentColor">${lsb(L0)} / ${lsb(L1)}</text></g>`; };
+    return svg(330,`
+      ${small(170,40,"label for bit 0")}${small(420,40,"label for bit 1 = label₀ ⊕ Δ")}${small(650,40,"colour bits")}
+      ${wires.map(row).join("")}
+      <g class="c-noise"><rect x="160" y="276" width="470" height="36" rx="6" fill="currentColor" fill-opacity=".1" stroke="currentColor"/></g>
+      <text x="175" y="299" class="mono" font-size="13" fill="currentColor">global Δ = ${hx(R.G.Delta)}  (last bit 1)</text>`,
+      "A table of wires with their two random 64-bit labels, which differ by the global offset delta; the last hex digit carries the colour bit."); },
+  play(){ fade(".lrow",0,200); blink("g.c-noise",900); },
+  math:()=>`<div class="formula">L₁ = L₀ ⊕ Δ,   Δ odd  ⇒  colour(L₁) = colour(L₀) ⊕ 1</div><p>Free-XOR: for an XOR gate, the output label is just the XOR of the input labels, because (A ⊕ aΔ) ⊕ (B ⊕ bΔ) = (A ⊕ B) ⊕ (a ⊕ b)Δ. A NOT gate swaps the two labels, which the garbler does for free.</p>`,
+  explain:()=>`<p>Garbling hides values by replacing each bit with a random 64-bit label. Real systems use 128-bit labels. The evaluator will hold exactly one label per wire and cannot tell which bit it stands for.</p>
+<p>Choosing all "1" labels as "0 label XOR Δ" for one secret Δ is the free-XOR trick (Kolesnikov–Schneider 2008). It makes XOR and NOT gates cost nothing: the evaluator just XORs labels.</p>
+<p>The last bit of each label is its colour. Because Δ is odd, the two labels of a wire always have opposite colours, and the colour is independent of the bit. The evaluator uses colours to pick the right table row without trying them all. This is called point-and-permute.</p>` },
+{ key:"Garble", who:"server", whoT:"garbler", at:1, budget:"0 B", scale:"4 rows per AND", err:()=>"exact",
+  title:"Garble one AND gate: encrypt and shuffle the truth table",
+  cap:()=>`For y₀ = z₀ ∧ ¬z₄, each of the 4 rows encrypts the right output label under the two input labels. The rows are then reordered by the input colours, so their position reveals nothing.`,
+  scene(){ const t=R.gy0, P=t.plain;
+    let g=small(40,40,"truth table (garbler only)")+small(470,40,"garbled table (sent), ordered by colour bits");
+    P.forEach((r,i)=>{ const y=60+i*58;
+      g+=`<g class="prow">${tile(40,y,60,40,""+r.va,"c-ok","",14)}${tile(110,y,60,40,""+r.vb,"c-warn","",14)}${tile(180,y,60,40,""+r.out,"c-client","",14)}</g>`;
+      g+=`<g class="crow" style="--dy:${(r.row-i)*58}px">${tile(470,60+r.row*58,300,40,"row "+r.row+": "+hx(r.ct),"c-server","",13)}</g>`;
+      g+=`<g class="c-muted"><line class="lnk" x1="246" y1="${y+20}" x2="464" y2="${60+r.row*58+20}" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#ahm)"/></g>`; });
+    g+=small(70,300,"z₀",'text-anchor="middle"')+small(140,300,"¬z₄",'text-anchor="middle"')+small(210,300,"y₀",'text-anchor="middle"');
+    g+=small(255,326,"each row = SHA-256(label_a, label_b, gate) ⊕ output label");
+    return svg(340,g,"The four truth-table rows of an AND gate are each encrypted and moved to a position given by the colour bits of their input labels."); },
+  play(){ fade(".prow",0,120); LS.A(".crow",[{opacity:0,transform:"translateX(-120px)"},{opacity:1,transform:"none"}],{t:500,s:200,d:800}); draw(".lnk",400,700); },
+  math:()=>{ const t=R.gy0; return `<table class="nums"><thead><tr><th>z₀</th><th>¬z₄</th><th>y₀</th><th>row</th><th>ciphertext</th></tr></thead><tbody>${t.plain.map(r=>`<tr><td>${r.va}</td><td>${r.vb}</td><td>${r.out}</td><td>${r.row}</td><td class="v">${hx(r.ct)}</td></tr>`).join("")}</tbody></table><p>row = 2·colour(label_a) + colour(label_b). The table for each of the ${R.nAND} AND gates is built the same way.</p>`; },
+  explain:()=>`<p>A gate's truth table has four rows. Garbling replaces each row by an encryption of the correct output label, using the two input labels for that row as the key. Here the encryption is a one-time pad from SHA-256 of the two labels and the gate number.</p>
+<p>If the rows stayed in truth-table order, the evaluator would learn the inputs from which row decrypted. Point-and-permute puts each row at the position given by its input labels' colours, which are random, so positions carry no information.</p>
+<p>The evaluator can open exactly one row: the one for which it holds both keys. Modern garbling sends only 2 rows per AND gate (half-gates, Zahur–Rosulek–Evans 2015), but 4 rows are easier to follow.</p>` },
+{ key:"Send", who:"server", whoT:"garbler", at:0.5, budget:()=>bytesStr(R.bytes.tables+R.bytes.labels+R.bytes.dec), scale:"bytes", err:()=>"exact",
+  title:"Send the garbled circuit and the server's input labels",
+  cap:()=>`The server sends ${R.nAND} tables (${R.bytes.tables} B), the 5 labels for its own bits (${R.bytes.labels} B) and the colours that decode the outputs. Its bits stay hidden inside the labels.`,
+  scene(){ const pk=(y,w,t,cls)=>`<g class="${cls} pkt"><rect x="250" y="${y}" width="${w}" height="34" rx="6" fill="currentColor" fill-opacity=".12" stroke="currentColor" stroke-width="2"/><text x="${250+w/2}" y="${y+22}" text-anchor="middle" font-size="12.5" fill="currentColor">${t}</text></g>`;
+    return svg(300,`
+      <g class="c-server"><rect x="20" y="40" width="190" height="220" rx="10" fill="currentColor" fill-opacity=".07" stroke="currentColor" stroke-width="2"/><text x="40" y="66" font-size="14" font-weight="700" fill="currentColor">Server (garbler)</text></g>${small(40,88,"knows all labels and Δ")}
+      <g class="c-client"><rect x="590" y="40" width="190" height="220" rx="10" fill="currentColor" fill-opacity=".07" stroke="currentColor" stroke-width="2"/><text x="610" y="66" font-size="14" font-weight="700" fill="currentColor">Client (evaluator)</text></g>${small(610,88,"will hold one label per wire")}
+      ${pk(70,300,R.nAND+" garbled tables · "+R.bytes.tables+" B","c-server")}
+      ${pk(120,300,"labels for s₄…s₀ · "+R.bytes.labels+" B","c-server")}
+      ${pk(170,300,"output decode colours · 4 bits","c-server")}
+      ${LS.arrow(214,240,584,240,"ahs","c-server")}
+      ${small(399,232,"one message",'text-anchor="middle"')}
+      ${small(250,290,"labels for s look random: the client cannot tell whether sᵢ is 0 or 1")}`,
+      "The server sends three packets to the client: garbled tables, labels for its own input bits and output decoding colours."); },
+  play(){ slide(".pkt",-180,0,0,220); },
+  math:()=>`<table class="nums"><thead><tr><th>item</th><th>size in this toy</th><th>with 128-bit labels and half-gates</th></tr></thead><tbody>
+    <tr><td>garbled tables</td><td class="v">${R.nAND} × 4 × 8 B = ${R.bytes.tables} B</td><td class="v">${R.nAND} × 2 × 16 B = ${R.nAND*32} B</td></tr>
+    <tr><td>server input labels</td><td class="v">5 × 8 B = ${R.bytes.labels} B</td><td class="v">5 × 16 B = 80 B</td></tr>
+    <tr><td>decode bits</td><td class="v">4 bits</td><td class="v">4 bits</td></tr></tbody></table>
+    <p>The server's labels for s: ${[0,1,2,3,4].map(i=>hx(R.K["s"+i])).join(", ")}.</p>`,
+  explain:()=>`<p>The garbled circuit is sent once. Its size grows with the number of AND gates, so circuit design is about minimizing ANDs.</p>
+<p>The server also sends the label for each of its own input bits. Because labels look random and colours are random, the client cannot tell which bit each label encodes.</p>
+<p>For the output wires, the server sends the colour of each wire's 0-label. The client can then decode the final labels into bits. That is the only point where a value becomes readable.</p>` },
+{ key:"OT", who:"client", whoT:"client + server", at:0.5, budget:()=>bytesStr(R.bytes.total-1), scale:"5 OTs", err:()=>"exact",
+  title:"Oblivious transfer: the client fetches its labels blindly",
+  cap:()=>`For each bit cᵢ the client must get the matching label without revealing cᵢ, and without learning the other label. Five oblivious transfers do this. All five deliver the right label: ${R.ots.every(o=>o.ok)?"yes":"no"}.`,
+  scene(){ const o=R.ots[0]; const XS=200, XC=600, msg=(y,dir,t,cls)=>`<g class="${cls} msg"><line x1="${dir>0?XS+4:XC-4}" y1="${y}" x2="${dir>0?XC-8:XS+8}" y2="${y}" stroke="currentColor" stroke-width="2" marker-end="url(#${cls==="c-client"?"ahc":"ahs"})"/><text x="400" y="${y-8}" text-anchor="middle" font-size="12" class="mono" fill="currentColor">${t}</text></g>`;
+    const sh=v=>v.toString(16).padStart(16,"0").slice(0,10)+"…";
+    return svg(340,`
+      <g class="c-server"><text x="${XS}" y="30" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Server</text><line x1="${XS}" y1="40" x2="${XS}" y2="250" stroke="currentColor" stroke-width="2" stroke-dasharray="3 4"/></g>
+      <g class="c-client"><text x="${XC}" y="30" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">Client  (c₀ = ${o.b})</text><line x1="${XC}" y1="40" x2="${XC}" y2="250" stroke="currentColor" stroke-width="2" stroke-dasharray="3 4"/></g>
+      ${msg(76,1,"C = g^c = "+sh(o.C),"c-server")}
+      ${msg(130,-1,"PK₀ = "+sh(o.PK0),"c-client")}
+      ${msg(184,1,"(R₀, E₀), (R₁, E₁): both labels, each locked","c-server")}
+      <g class="c-client got"><rect x="${XC-236}" y="206" width="224" height="34" rx="6" fill="currentColor" fill-opacity=".12" stroke="currentColor" stroke-width="2"/><text x="${XC-124}" y="228" text-anchor="middle" font-size="12" class="mono" fill="currentColor">opens E${LS.sub(o.b)} → ${sh(o.got)}</text></g>
+      ${small(40,284,"all 5 bits:")}
+      ${R.ots.map((t,i)=>`<g class="otc ${t.ok?"c-ok":"c-warn"}"><rect x="${120+i*130}" y="268" width="120" height="30" rx="5" fill="currentColor" fill-opacity=".1" stroke="currentColor"/><text x="${180+i*130}" y="288" text-anchor="middle" font-size="12" fill="currentColor">c${LS.sub(i)}: label ${t.ok?"✓":"✗"}</text></g>`).join("")}
+      ${small(120,322,"The server sees PK₀, which is a random group element whatever cᵢ is. The client can unlock only one of E₀, E₁.")}`,
+      "A message sequence between server and client for one oblivious transfer, followed by five check marks for the five client bits."); },
+  play(){ slide(".msg",0,-10,0,350); pop(".got",1200); pop(".otc",1500,100); },
+  math:()=>{ const o=R.ots[0]; return `<p>Bellare–Micali OT in Z<sub>p</sub>*, p = 2⁶¹ − 1, g = 37 (toy group). The client with choice σ picks k, sets PK_σ = g^k and PK_{1−σ} = C / g^k, and sends only PK₀. The server derives PK₁ = C / PK₀ and sends E_j = H(PK_j^{r_j}) ⊕ label_j with R_j = g^{r_j}. Only PK_σ has a known discrete log, so the client can open only E_σ.</p>
+    <table class="nums"><thead><tr><th>bit</th><th>cᵢ (client only)</th><th>received label</th><th>correct</th></tr></thead><tbody>${R.ots.map(t=>`<tr><td>c${LS.sub(t.i)}</td><td>${t.b}</td><td class="v">${hx(t.got)}</td><td>${t.ok?"✓":"✗"}</td></tr>`).join("")}</tbody></table><p>Bytes: 5 × ${o.bytes} B = ${5*o.bytes} B in this toy.</p>`; },
+  explain:()=>`<p>The client needs, for each of its bits, the one label that matches. Asking for "the label for 1" would reveal the bit, and getting both labels would let it learn more than the output. Oblivious transfer solves exactly this: the sender offers two messages, the receiver gets one of its choice, the sender does not learn which, and the receiver learns nothing about the other.</p>
+<p>The version here is Bellare–Micali (1989) in a small toy group. The client builds two public keys whose product is fixed by the server. It knows the secret key of only one of them, the one at its chosen position. The server encrypts each label under one key.</p>
+<p>OT needs public-key operations, but OT extension (IKNP 2003, and silent OT today) turns a few hundred base OTs into millions of cheap ones. In MPC for LLMs, OT traffic for non-linear layers is a large part of the communication.</p>` },
+{ key:"Evaluate", who:"client", whoT:"evaluator", at:0, budget:()=>bytesStr(R.bytes.total-1), scale:"labels", err:()=>"exact",
+  title:"Evaluate gate by gate, opening one row each",
+  cap:()=>`The client XORs labels for free gates and, for each AND gate, decrypts the single row chosen by the colour bits. It never sees a bit, only random-looking labels.`,
+  scene(){ const T=R.ev.trace; let g=""; const role=w=>w[0]==="y"?"y"+LS.sub(w.slice(1)):w[0]==="k"?"carry"+LS.sub(w.slice(1)):"carry"+LS.sub(+w.slice(1)+1);
+    T.forEach((t,i)=>{ const x=30+(i%4)*190, y=40+Math.floor(i/4)*130, out=R.circuit.find(c=>c.id===t.id).out;
+      g+=`<g class="c-client card"><rect x="${x}" y="${y}" width="176" height="104" rx="8" fill="currentColor" fill-opacity=".06" stroke="currentColor" stroke-width="2"/>
+        <text x="${x+12}" y="${y+22}" font-size="13" font-weight="700" fill="currentColor">AND #${t.id} → ${role(out)}</text>
+        ${[0,1,2,3].map(r=>`<rect x="${x+12+r*38}" y="${y+36}" width="32" height="22" rx="3" fill="currentColor" fill-opacity="${r===t.row?.6:.08}" stroke="currentColor"/><text x="${x+28+r*38}" y="${y+51}" text-anchor="middle" font-size="11" class="mono" fill="currentColor">${r}</text>`).join("")}
+        <text x="${x+12}" y="${y+84}" font-size="11.5" class="mono" fill="currentColor">${hx(t.out).slice(0,14)}…</text></g>`; });
+    g+=small(30,312,"highlighted = the only row the client can decrypt; the resulting label is the input to later gates");
+    return svg(330,g,"Eight cards, one per AND gate, each highlighting the single table row the client opened and the label it obtained."); },
+  play(){ pop(".card",0,140); },
+  math:()=>`<table class="nums"><thead><tr><th>gate</th><th>row opened</th><th>output label</th></tr></thead><tbody>${R.ev.trace.map(t=>`<tr><td>AND #${t.id}</td><td>${t.row}</td><td class="v">${hx(t.out)}</td></tr>`).join("")}</tbody></table>`,
+  explain:()=>`<p>Evaluation is mechanical. XOR gates: XOR the two input labels. NOT gates: keep the label, because the garbler already swapped its meaning. AND gates: read the two input colours, go to that row, and decrypt it with the two labels. Out comes the output label.</p>
+<p>At every wire the client holds one random-looking label and no way to tell its bit. The garbler's design guarantees the label is the correct one for the true value, so the computation is exact.</p>
+<p>Evaluating costs one hash per AND gate, which is very fast. Garbled circuits are limited by bandwidth, not computation. A billion AND gates is about 32 GB of tables with half-gates.</p>` },
+{ key:"Decode", who:"client", whoT:"client", at:0, budget:()=>bytesStr(R.bytes.total), scale:"÷ 40", err:()=>Math.abs(R.yv-R.trueRelu)<1e-12?"exact":Math.abs(R.yv-R.trueRelu),
+  title:"Decode the output labels",
+  cap:()=>`Each output label's colour XOR the server's decode bit gives a real bit: y = ${R.yb.slice().reverse().join("")}₂ = <b>${R.y}</b>, so y = ${R.y}/40 = <b>${f(R.yv)}</b>. Exact.`,
+  scene(){ return svg(300,`
+    ${[3,2,1,0].map((i,k)=>`<g class="dec"><text x="${175+k*150}" y="40" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">y${LS.sub(i)}</text>
+      <g class="c-client"><text x="${175+k*150}" y="70" text-anchor="middle" font-size="12" class="mono" fill="currentColor">colour ${lsb(R.ev.K["y"+i])}</text></g>
+      <g class="c-server"><text x="${175+k*150}" y="94" text-anchor="middle" font-size="12" class="mono" fill="currentColor">⊕ decode ${R.dec[i]}</text></g>
+      ${tile(145+k*150,108,60,46,""+R.yb[i],"c-ok","",20)}</g>`).join("")}
+    <g class="c-client big"><text x="400" y="220" text-anchor="middle" font-size="36" class="mono" fill="currentColor">${R.y}  →  ${f(R.yv)}</text></g>
+    ${small(400,252,"true ReLU(z) = "+f(R.trueRelu)+"   ·   total traffic in this toy ≈ "+R.bytes.total+" B for one neuron",'text-anchor="middle"')}`,
+    "Four output bits are decoded from label colours and decode bits, giving 14, which is 0.35 after dividing by 40."); },
+  play(){ pop(".dec",0,150); pop(".big",800); },
+  math:()=>`<div class="formula">yᵢ = colour(final label of yᵢ) ⊕ colour(label₀ of yᵢ)</div><div class="formula">y = ${R.yb.slice().reverse().join("")}₂ = ${R.y},   ${R.y}/40 = ${f(R.yv)}</div><table class="nums"><thead><tr><th>traffic</th><th>bytes</th></tr></thead><tbody><tr><td>garbled tables</td><td class="v">${R.bytes.tables}</td></tr><tr><td>server labels</td><td class="v">${R.bytes.labels}</td></tr><tr><td>oblivious transfers</td><td class="v">${R.bytes.ot}</td></tr><tr><td>decode bits</td><td class="v">${R.bytes.dec}</td></tr><tr><td><b>total</b></td><td class="v"><b>${R.bytes.total}</b></td></tr></tbody></table>`,
+  explain:()=>`<p>Decoding is the only step where a bit becomes visible, and only for the output wires the garbler chose to reveal. Here the client learns y. In a full protocol such as Delphi, the output would instead stay secret-shared and feed the next linear layer.</p>
+<p>The answer is exact: 14/40 = 0.35, the true ReLU. Compare CKKS, which gave 0.326 because ReLU had to be approximated by a polynomial.</p>
+<p>The price is traffic: about half a kilobyte for one 5-bit ReLU in this toy. For an LLM with 32-bit fixed point and millions of activations per layer, garbled non-linear layers cost gigabytes per token, which is why systems like BOLT and BumbleBee replace them with cheaper OT-based protocols and polynomial approximations.</p>` }
+];
+const cfg={ id:"garbled", title:"Garbled Circuits Step by Step", compute, setup,
+  inputNote:"x is rounded to one decimal; 40·z must stay between −16 and 15 to fit 5 bits.", reseedLabel:"New labels and shares",
+  status:{budgetLabel:"Traffic so far", budgetCells:4, scaleLabel:"Working on", errLabel:"Error"},
+  footer:'Real toy garbled circuit: 64-bit labels, free-XOR, point-and-permute, SHA-256 row encryption, and Bellare–Micali OT in Z<sub>p</sub>*, p = 2⁶¹ − 1 (toy group). Scheme: Yao, <a href="https://doi.org/10.1109/SFCS.1986.25">FOCS 1986</a>; free-XOR: Kolesnikov and Schneider, ICALP 2008.',
+  cardResult:()=>`${f(R.yv)} exactly (true ${f(R.trueRelu)})`,
+  steps };
+steps.push(LS.cardStep(cfg,{name:"Garbled circuits",budget:()=>bytesStr(R.bytes.total),err:()=>"exact",
+  explain:()=>`<p>Garbled circuits give exact non-linear functions in a constant number of rounds. Their cost is traffic proportional to the number of AND gates, and an oblivious transfer per input bit of the evaluator. In private LLM inference they are one tool for the non-linear layers of hybrid protocols, alongside OT-based comparison and function secret sharing.</p>`}));
+LS.start(cfg);
+})();
+</script>
+</body>
+</html>

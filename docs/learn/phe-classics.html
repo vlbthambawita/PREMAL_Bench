@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Classic PHE Step by Step</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lesson.css">
+</head>
+<body>
+<div id="app"></div>
+<script src="lessons.js"></script>
+<script src="cards/phe-classics.js"></script>
+<script src="lesson.js"></script>
+<script src="engines/phe.js"></script>
+<script>
+(function(){
+"use strict";
+const {svg,tile,lock,lbl,small,arrow,pop,fade,draw,slide,blink,growX,f,fe,sup,big}=LS;
+const hx=(v,m)=>LS.hex(v,m,5);
+let Rs, E, Gm, Bg, Cl, R;
+function compute(inp){
+  const x=[inp.x1,inp.x2], N=LS.neuron(x);
+  const xi=x.map(v=>BigInt(Math.round(v*10))), wi=[2n,-1n], bi=4n, zs=xi[0]*wi[0]+xi[1]*wi[1]+bi;
+  /* RSA */
+  const r1=Rs.enc(xi[0]), r1b=Rs.enc(xi[0]), r2=Rs.enc(wi[0]), rp=Rs.mul(r1,r2), rpd=Rs.dec(rp);
+  const rs=Rs.mul(Rs.enc(xi[0]*wi[0]),Rs.enc(LS.mod(xi[1]*wi[1],Rs.n))), rsd=PHE.center(Rs.dec(rs),Rs.n);
+  /* exponential ElGamal */
+  const e1=E.enc(xi[0]), e2=E.enc(xi[1]), ez=E.addConst(E.add(E.mulConst(e1,wi[0]),E.mulConst(e2,wi[1])),bi), gz=E.decG(ez), dl=E.dlog(gz,2000);
+  /* Goldwasser–Micali on the 6-bit two's complement of 40z */
+  const W6=6, u=Number(LS.mod(zs,64n)), bitsv=Array.from({length:W6},(_,i)=>(u>>(W6-1-i))&1);
+  const gb=bitsv.map(b=>Gm.enc(b)), par=gb.reduce((a,b)=>Gm.xor(a,b)), pard=Gm.dec(par), signd=Gm.dec(gb[0]);
+  /* BGN exponent model: linear part additively, then one pairing for z² */
+  const bx1=Bg.enc(xi[0]), bx2=Bg.enc(xi[1]), bz=Bg.add(Bg.add(Bg.mulConst(bx1,wi[0]),Bg.mulConst(bx2,LS.mod(wi[1],Bg.n))),Bg.enc(bi)), bzd=Bg.dec(bz);
+  const one=Bg.enc(1n), sq=Bg.pair(bz,bz), sqd=Bg.dec(sq), lin=Bg.pair(bz,one);
+  const by=Bg.add(Bg.add(Bg.mulConst(sq,15n),Bg.mulConst(lin,640n)),Bg.pair(Bg.enc(4800n),one)), byd=Bg.dec(by);
+  /* CL analogue */
+  const c1=Cl.enc(xi[0]), c2=Cl.enc(xi[1]), cz=Cl.addConst(Cl.add(Cl.mulConst(c1,wi[0]),Cl.mulConst(c2,wi[1])),bi), czd=Cl.dec(cz);
+  R={...N,xi,wi,bi,zs,r1,r1b,r2,rp,rpd,rs,rsd,e1,e2,ez,gz,dl,bitsv,gb,par,pard,signd,bx1,bz,bzd,sq,sqd,by,byd,c1,cz,czd,
+     poly:0.09375+0.5*N.z+0.46875*N.z*N.z, ybgn:Number(byd)/51200};
+  return R;
+}
+const card=(x,y,name,op,cls,ok)=>`<g class="cardg"><g class="${cls}"><rect x="${x}" y="${y}" width="140" height="96" rx="8" fill="currentColor" fill-opacity=".08" stroke="currentColor" stroke-width="2"/><text x="${x+70}" y="${y+28}" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">${name}</text><text x="${x+70}" y="${y+58}" text-anchor="middle" font-size="22" fill="currentColor" class="mono">${op}</text></g><text x="${x+70}" y="${y+84}" text-anchor="middle" font-size="12" fill="currentColor" class="c-muted">${ok}</text></g>`;
+const steps=[
+{ key:"Overview", who:"both", whoT:"the task", at:0, budget:"—", scale:"integers", err:()=>0,
+  title:"Five schemes, one operation each",
+  cap:()=>`Before 2009 every homomorphic scheme supported essentially one operation. We push the integer neuron (40z = ${big(R.zs)}) through each and see how far it gets.`,
+  scene(){ return svg(250,`
+      ${card(20,40,"RSA","×","c-server","products only")}${card(176,40,"ElGamal","+","c-server","in the exponent")}${card(332,40,"Goldwasser–Micali","⊕","c-server","XOR of bits")}${card(488,40,"BGN","+, one ×","c-ok","degree-2 only")}${card(644,40,"Castagnos–L.","+","c-server","no size limit")}
+      ${small(20,176,"1978")}${small(176,176,"1985")}${small(332,176,"1984")}${small(488,176,"2005")}${small(644,176,"2015")}
+      ${small(20,214,"Neuron encoding as in Paillier: x×10 = ["+R.xi.join(", ")+"], w×4 = [2, −1], b×40 = 4, so 40z = "+R.zs+".")}`,
+      "Five classic partially homomorphic schemes and the single operation each supports."); },
+  play(){ pop(".cardg",0,140); },
+  math:()=>`<div class="formula">40z = 10x₁·2 + 10x₂·(−1) + 4 = ${R.zs}</div>`,
+  explain:()=>`<p>A homomorphic encryption scheme is <i>partially</i> homomorphic if it supports one kind of operation on ciphertexts, either addition or multiplication, but not both. Several of the best-known public-key schemes have this property almost by accident, because their algebra is a group.</p><p>This lesson runs real toy versions of RSA, exponential ElGamal and Goldwasser–Micali on our neuron. BGN and Castagnos–Laguillaumie use structures that are hard to build in a few lines (pairings and class groups). They are shown with clearly labelled models that keep the algebra exact but drop the security.</p><p>The pattern is the point. Each scheme can handle part of the linear layer, none can handle ReLU, and only BGN gets even one multiplication.</p>` },
+{ key:"RSA", who:"server", whoT:"server", at:1, budget:"products only", scale:"integers", err:()=>0,
+  title:"RSA multiplies, but cannot add",
+  cap:()=>`Enc(${R.xi[0]})·Enc(2) decrypts to <b>${R.rpd}</b>: products work. Multiplying Enc(30)·Enc(−20) gives ${big(R.rsd)}, not 10. And Enc(${R.xi[0]}) is the same every time.`,
+  scene(){ return svg(280,`
+      ${small(40,30,"TEXTBOOK RSA: Enc(m) = mᵉ mod n,  e = 65537")}
+      <g class="rr">${tile(40,44,200,42,"Enc("+R.xi[0]+") = "+hx(R.r1,Rs.n),"c-client","",12.5)}</g><text x="258" y="71" font-size="18" fill="currentColor">×</text>
+      <g class="rr">${tile(278,44,200,42,"Enc(2) = "+hx(R.r2,Rs.n),"c-server","",12.5)}</g>${arrow(488,65,548,65,"ahk","c-ok")}
+      <g class="rr">${tile(556,44,200,42,"decrypts to "+R.rpd,"c-ok","",13)}</g>
+      <g class="rs">${tile(40,118,200,42,"Enc(30)","c-client","",13)}</g><text x="258" y="145" font-size="18" fill="currentColor">×</text>
+      <g class="rs">${tile(278,118,200,42,"Enc(−20)","c-client","",13)}</g>${arrow(488,139,548,139,"ahw","c-warn")}
+      <g class="rs">${tile(556,118,200,42,big(R.rsd).slice(0,16)+(big(R.rsd).length>16?"…":""),"c-warn","",12.5)}</g>
+      ${small(556,178,"= 30 · (−20) mod n, not 30 + (−20)")}
+      <g class="rd">${tile(40,200,200,42,"Enc("+R.xi[0]+") again","c-client","",13)}${lbl(258,226,R.r1===R.r1b?"identical ciphertext: "+hx(R.r1b,Rs.n)+"  (no randomness)":"different")}</g>`,
+      "RSA ciphertexts multiply to the product of plaintexts; trying to add gives a product instead; encrypting the same value twice gives the same ciphertext."); },
+  play(){ slide(".rr",-30,0,0,200); slide(".rs",-30,0,800,200); pop(".rd",1600); },
+  math:()=>`<div class="formula">Enc(a)·Enc(b) = aᵉbᵉ = (ab)ᵉ = Enc(a·b) mod n</div><div class="formula">n = ${Rs.n},  d = ${Rs.d}</div><p>Textbook RSA is deterministic, so it is not semantically secure. Padded RSA (OAEP) is secure but no longer homomorphic.</p>`,
+  explain:()=>`<p>RSA encrypts m as mᵉ mod n. Multiplying two ciphertexts gives (ab)ᵉ, an encryption of the product, so RSA is multiplicatively homomorphic. If the server had the weights encrypted, it could form each product x·w on its own.</p><p>It cannot form the sum of the products. Multiplying ciphertexts always multiplies plaintexts. The figure shows the "sum" coming out as 30 · (−20) mod n, a huge number.</p><p>Worse, textbook RSA has no randomness. The same input always gives the same ciphertext, so an observer can tell when two tokens are equal. Real RSA uses random padding, which destroys the homomorphism. RSA is a historical curiosity for private inference.</p>` },
+{ key:"ElGamal", who:"server", whoT:"server", at:1, budget:"additions only", scale:"g^(40z)", err:()=>Math.abs(Number(R.dl.m)/40-R.z),
+  title:"Exponential ElGamal adds, then needs a discrete log",
+  cap:()=>`Put m in the exponent, gᵐ. Then multiplying ciphertexts adds plaintexts and the linear part works. Decryption yields g^${R.zs} and finds ${R.dl.m} by trying ${R.dl.tries} candidates.`,
+  scene(){ return svg(290,`
+      ${small(40,30,"Enc(m) = (gʳ, gᵐ·hʳ) mod p,  p = 2q + 1 ("+E.p.toString(2).length+" bits),  h = gˣ")}
+      <g class="eg">${tile(40,44,220,42,"Enc("+R.xi[0]+")²","c-client","",13)}</g><text x="276" y="71" font-size="18" fill="currentColor">·</text>
+      <g class="eg">${tile(294,44,220,42,"Enc("+R.xi[1]+")⁻¹","c-client","",13)}</g><text x="530" y="71" font-size="18" fill="currentColor">·</text>
+      <g class="eg">${tile(548,44,200,42,"(1, g⁴)","c-server","",13)}</g>
+      ${arrow(394,92,394,118,"ahc","c-client")}
+      <g class="eg2">${tile(250,124,290,42,"Enc(40z): decrypt → g^(40z)","c-client","",13)}</g>
+      ${small(40,204,"DISCRETE LOG SEARCH  g⁰, g¹, g⁻¹, g², … until it matches")}
+      ${(()=>{ const cand=[0,1,-1,2,-2,3,-3,"…",R.dl.m]; return cand.map((m,i)=>{ const hit=m===R.dl.m&&i===cand.length-1; const cls=hit?"c-ok":"c-muted"; return `<g class="dl ${cls}"><rect x="${40+i*80}" y="214" width="70" height="32" rx="4" fill="currentColor" fill-opacity="${hit?".25":".08"}" stroke="currentColor"/><text x="${75+i*80}" y="235" text-anchor="middle" font-size="12" class="mono" fill="currentColor">${m==="…"?"…":"g^"+big(m)}</text></g>`; }).join(""); })()}
+      ${small(40,270,"found m = "+R.dl.m+" after "+R.dl.tries+" tries. A 64-bit result would need about 2³² steps (baby-step giant-step).")}`,
+      "Exponential ElGamal ciphertexts combine to an encryption of forty z in the exponent; decryption needs a small discrete-log search that finds fourteen."); },
+  play(){ slide(".eg",-30,0,0,180); pop(".eg2",700); fade(".dl",1100,40); },
+  math:()=>`<div class="formula">Enc(a)·Enc(b) = (g^{r+r′}, g^{a+b}·h^{r+r′}) = Enc(a + b)</div><div class="formula">decrypt: c₂ / c₁ˣ = g^{40z} = ${R.gz}  →  discrete log ${R.dl.m}  →  z = ${f(Number(R.dl.m)/40)}</div>`,
+  explain:()=>`<p>Plain ElGamal is multiplicative, like RSA, but randomised. The "exponential" variant encrypts gᵐ instead of m. Multiplying ciphertexts then multiplies gᵃ·gᵇ = gᵃ⁺ᵇ, so the scheme becomes additive, and scaling by a public weight is exponentiation.</p><p>The server computes our linear layer exactly as with Paillier. The catch is decryption. The client recovers g^(40z), not 40z itself, and must solve a discrete logarithm. That is only feasible when the answer is small, here by trying candidates one by one.</p><p>Exponential ElGamal is therefore used for small counts, as in e-voting tallies, or with elliptic curves for compact ciphertexts. It is not post-quantum: Shor's algorithm breaks discrete logs.</p>` },
+{ key:"Goldwasser–Micali", who:"server", whoT:"server", at:1, budget:"XOR only", scale:"bits", err:()=>0,
+  title:"Goldwasser–Micali: XOR of encrypted bits",
+  cap:()=>`Encrypt the 6 bits of 40z = ${R.zs} separately. Multiplying ciphertexts XORs bits, giving the parity <b>${R.pard}</b>. ReLU needs AND (sign bit ∧ value), which GM cannot do.`,
+  scene(){ return svg(280,`
+      ${small(40,30,"BITS OF 40z = "+R.zs+" (6-bit two's complement), each its own ciphertext mod n ("+Gm.n.toString(2).length+" bits)")}
+      ${R.bitsv.map((b,i)=>`<g class="gb">${tile(40+i*118,44,108,40,String(b),i===0?"c-warn":"c-client","",16)}${tile(40+i*118,92,108,34,hx(R.gb[i],Gm.n),"c-client","",11)}</g>`).join("")}
+      ${small(40,150,"bit 5 (sign)")}${small(158,150,"bit 4")}${small(630,150,"bit 0")}
+      ${arrow(394,162,394,186,"ahs","c-server")}${small(406,178,"multiply all six ciphertexts")}
+      <g class="par">${tile(250,192,290,42,"Enc(parity) → "+R.pard,"c-ok","",14)}</g>
+      ${small(40,262,"ReLU on bits = each value bit AND (NOT sign). AND is multiplication of bits, which GM lacks.")}`,
+      "Six encrypted bits of forty z; multiplying their ciphertexts yields an encryption of the XOR of all bits."); },
+  play(){ pop(".gb",0,100); fade(".c-server line",800); pop(".par",1100); },
+  math:()=>`<div class="formula">Enc(b) = yᵇ·r² mod n,   y = n − 1 (a non-square with Jacobi symbol +1)</div><div class="formula">Enc(a)·Enc(b) = y^{a+b}·(r r′)² = Enc(a ⊕ b);   decrypt: c^{(p−1)/2} mod p = 1 ⇔ bit 0</div><div class="formula">bits = [${R.bitsv.join(", ")}],  parity = ${R.pard},  sign bit decrypts to ${R.signd}</div>`,
+  explain:()=>`<p>Goldwasser–Micali (1982, JCSS 1984) was the first provably semantically secure public-key scheme. It encrypts one bit at a time: a 0 becomes a random square modulo n, and a 1 becomes a random non-square. Deciding which is which without the factors of n is the quadratic residuosity problem.</p><p>Multiplying two ciphertexts multiplies square by square, square by non-square, and so on. The plaintexts combine by XOR, so GM is XOR-homomorphic. The figure computes the parity of the bits of 40z without decrypting any of them.</p><p>Two problems show why nobody runs neural networks on GM. Each bit costs a full ciphertext of the size of n, so encryption expands data enormously. And without AND, even a single comparison such as "is z negative?" combined with z cannot be finished.</p>` },
+{ key:"BGN", who:"server", whoT:"server", at:1, budget:"1 multiplication", scale:"51200·p(z)", err:()=>Math.abs(R.ybgn-R.poly), sim:true,
+  title:"BGN: additions plus one multiplication",
+  cap:()=>`A pairing multiplies once, enough for z² and the CKKS-style degree-2 ReLU. The model gives 51200·p(z) = <b>${big(R.byd)}</b>, so y = ${f(R.ybgn,6)}, the same value as the CKKS polynomial.`,
+  scene(){ return svg(300,`
+      ${small(40,30,"EXPONENT MODEL: each ciphertext is the exponent c = m + q₂·r mod n,  n = q₁q₂")}
+      <g class="b1">${tile(40,44,210,42,"Enc(40z) via +, ×k","c-client","",13)}</g>${small(262,70,"→ "+big(R.bzd))}
+      ${arrow(145,92,145,124,"ahs","c-server")}${small(156,112,"pairing e(·,·): the one ×")}
+      <g class="b2">${tile(40,128,210,42,"Enc((40z)²) in G_T","c-client","",13)}</g>${small(262,154,"→ "+big(R.sqd))}
+      ${arrow(145,176,145,208,"ahs","c-server")}${small(156,196,"+ in G_T only, no more ×")}
+      <g class="b3">${tile(40,212,330,42,"15·(40z)² + 640·(40z) + 4800","c-client","",13)}</g>${small(382,238,"→ "+big(R.byd)+"  =  51200 · p(z)")}
+      <g class="c-ok b3">${lbl(560,120,"y = "+big(R.byd)+" / 51200")}<text x="560" y="152" font-size="26" font-family="var(--mono)" fill="currentColor">${f(R.ybgn)}</text>${small(560,174,"CKKS lesson p(z) = "+f(R.poly))}</g>
+      ${small(40,284,"Real BGN uses an elliptic curve of composite order n with a bilinear pairing; this model keeps only the exponent arithmetic.")}`,
+      "In a model that tracks exponents, BGN adds and scales, applies one pairing to square forty z, and combines terms to get the degree-two ReLU polynomial times 51200."); },
+  play(){ pop(".b1",0); fade(".c-server",400); pop(".b2",600); pop(".b3",1200); },
+  math:()=>`<div class="formula">p(z) = 0.09375 + 0.5z + 0.46875z²  ⇒  51200·p = 4800 + 640·(40z) + 15·(40z)²</div><div class="formula">q₁ = ${Bg.q1}, q₂ = ${Bg.q2};   decrypt: (c·q₁ mod n)/q₁ = m   (a small discrete log in the order-q₁ subgroup)</div><div class="formula">40z = ${R.bzd},  (40z)² = ${R.sqd},  51200·p(z) = ${R.byd}</div><p><b>Simplification:</b> in real BGN, c is a curve point gᵐhʳ and the pairing e(gᵃ, gᵇ) = e(g,g)^{ab} multiplies exponents. Here we compute on the exponents directly, which is insecure but algebraically identical.</p>`,
+  explain:()=>`<p>Boneh, Goh and Nissim (TCC 2005) found a scheme with unlimited additions <i>and one multiplication</i>. Ciphertexts are points in an elliptic-curve group of composite order n = q₁q₂. A bilinear pairing maps two points to a target group and multiplies their exponents along the way. That is the one multiplication. Results in the target group can still be added, but not paired again.</p><p>One multiplication is exactly what a degree-2 polynomial needs. So BGN can evaluate z² and the same ReLU stand-in the CKKS lesson used. Our model returns 51200·p(z) = 16700, i.e. y ≈ 0.3262, matching CKKS digit for digit.</p><p>Two limits remain. Decryption is a discrete log, so results must be small. A second layer would need a second multiplication, which BGN cannot do. Building a correct pairing over a composite-order curve is beyond a short toy, so this step is marked as a model.</p>` },
+{ key:"CL", who:"server", whoT:"server", at:1, budget:"additions only", scale:"integers mod p", err:()=>0, sim:true,
+  title:"Castagnos–Laguillaumie: additive, no discrete-log limit",
+  cap:()=>`CL hides the message in a subgroup where discrete logs are easy, so decryption works for any size of result. In the analogue group the linear part decrypts to <b>${big(R.czd)}</b>.`,
+  scene(){ return svg(270,`
+      ${small(40,30,"STRUCTURE OF THE CL FRAMEWORK")}
+      <g class="c-server cl"><rect x="40" y="44" width="330" height="150" rx="10" fill="currentColor" fill-opacity=".06" stroke="currentColor" stroke-width="2"/><text x="56" y="70" font-size="14" font-weight="700" fill="currentColor">group G of unknown order</text>
+      <rect x="60" y="86" width="140" height="90" rx="8" fill="currentColor" fill-opacity=".1" stroke="currentColor"/><text x="130" y="122" text-anchor="middle" font-size="13" fill="currentColor">⟨g⟩: DDH hard</text><text x="130" y="142" text-anchor="middle" font-size="12" fill="currentColor" class="c-muted">masks hʳ</text>
+      <rect x="214" y="86" width="140" height="90" rx="8" fill="currentColor" fill-opacity=".1" stroke="currentColor"/><text x="284" y="122" text-anchor="middle" font-size="13" fill="currentColor">F = ⟨f⟩: DL easy</text><text x="284" y="142" text-anchor="middle" font-size="12" fill="currentColor" class="c-muted">carries fᵐ</text></g>
+      ${small(40,220,"Enc(m) = (gʳ, fᵐ·hʳ). Decrypt: divide out hʳ, then read m off fᵐ directly.")}
+      <g class="cl2">${tile(420,60,330,42,"analogue G = (Z/p²Z)*,  f = 1 + p","c-muted","",13)}${tile(420,112,330,42,"Enc(15)²·Enc(20)⁻¹·f⁴","c-client","",13)}${tile(420,164,330,42,"decrypts to "+big(R.czd),"c-ok","",14)}</g>
+      ${small(420,232,"fᵐ = 1 + m·p mod p², so m = (fᵐ − 1)/p: no search needed")}`,
+      "Castagnos–Laguillaumie places the message in a subgroup with easy discrete logarithms inside a group of unknown order; in a small analogue group the linear part decrypts to fourteen."); },
+  play(){ fade(".cl",0); slide(".cl2",30,0,500,200); },
+  math:()=>`<div class="formula">analogue: p = ${Cl.p},  f = 1 + p (order p),  g of order dividing p − 1</div><div class="formula">Enc(40z) decrypts to ${R.czd}</div><p><b>Simplification:</b> the real scheme uses the class group of an imaginary quadratic field, whose order is unknown. In (Z/p²Z)* the order p(p−1) is public, so the toy shows the algebra only and is not secure.</p>`,
+  explain:()=>`<p>Castagnos and Laguillaumie (CT-RSA 2015) combined the best of Paillier and ElGamal. Like ElGamal, a random mask hʳ hides the message under a DDH-type assumption. Like Paillier, the message lives in a subgroup F where discrete logarithms are easy, so decryption needs no search and works for any message size modulo a prime.</p><p>The trick is to use the class group of an imaginary quadratic field, whose order nobody can compute, with F a subgroup of known prime order. That also makes the scheme useful in threshold ECDSA and MPC, where a prime message space matters.</p><p>A class-group implementation is too long for a toy. We run the same algebra in (Z/p²Z)*, where f = 1 + p has easy logs. The neuron's linear part decrypts to 14, and ReLU remains as impossible as in every additive scheme.</p>` },
+{ key:"Side by side", who:"both", whoT:"comparison", at:0, budget:"—", scale:"—", err:()=>0,
+  title:"How far each scheme gets with the neuron",
+  cap:()=>`Additive schemes finish the linear part exactly. Only BGN reaches the polynomial ReLU, and none can do the real ReLU or a second layer.`,
+  scene(){ const cols=["w·x + b","z²","ReLU","random","post-quantum"]; const rows=[["RSA","✗","✗","✗","✗","✗"],["ElGamal (exp.)","✓","✗","✗","✓","✗"],["Goldwasser–Micali","✗","✗","✗","✓","✗"],["BGN","✓","✓","✗","✓","✗"],["Castagnos–L.","✓","✗","✗","✓","✗"],["Paillier (lesson 14)","✓","✗","✗","✓","✗"],["CKKS (lesson 1)","✓","✓","≈","✓","✓"]];
+    let g=cols.map((c,i)=>`<text x="${290+i*100}" y="34" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">${c}</text>`).join("");
+    rows.forEach((r,j)=>{ const y=50+j*32; g+=`<g class="tr"><text x="40" y="${y+20}" font-size="13" fill="currentColor"${j===6?' class="c-client" font-weight="700"':""}>${r[0]}</text>${r.slice(1).map((v,i)=>`<g class="${v==="✓"?"c-ok":v==="≈"?"c-noise":"c-warn"}"><text x="${290+i*100}" y="${y+21}" text-anchor="middle" font-size="16" fill="currentColor">${v}</text></g>`).join("")}<line x1="40" y1="${y+30}" x2="760" y2="${y+30}" stroke="currentColor" opacity=".12"/></g>`; });
+    g+=small(40,290,"✓ supported, ✗ not supported, ≈ approximate. \"random\" = semantically secure (randomised) encryption.");
+    return svg(300,g,"Table comparing which parts of the neuron each classic scheme supports, with CKKS for reference."); },
+  play(){ slide(".tr",-20,0,0,90); },
+  math:()=>`<p>w·x + b counts as supported when the server can compute it from encrypted x and public weights. For RSA the weights would have to be encrypted, and even then the sum fails.</p>`,
+  explain:()=>`<p>The table is the reason fully homomorphic encryption was a breakthrough. Every classic scheme is a group homomorphism. Each gives one operation for free and nothing else.</p><p>For a single linear layer that is enough, and it is why Paillier and ElGamal still appear in federated learning, voting and private set intersection. For a neural network, the non-linear layers force either interaction (lesson 14's helper round, or MPC in lessons 17–19) or a scheme with both operations.</p><p>None of these schemes is post-quantum. Factoring and discrete logs fall to Shor's algorithm, while lattice-based schemes such as CKKS, BFV and TFHE are believed to resist quantum attacks.</p>` }
+];
+const cfg={ id:"phe-classics", title:"Classic PHE Step by Step", compute,
+  setup:()=>{ Rs=PHE.rsa(32); E=PHE.elgamal(40); Gm=PHE.gm(32); Bg=PHE.bgnModel(20); Cl=PHE.clAnalogue(32); },
+  reseedLabel:"New random keys",
+  inputNote:"x is scaled by 10 and rounded, so use one decimal place. Keep |40z| < 32 for the 6-bit GM step.",
+  status:{budgetLabel:"Operations", scaleLabel:"Encoding", errLabel:"Error so far"},
+  footer:'Real toy RSA (two 32-bit primes), exponential ElGamal (40-bit safe-prime subgroup) and Goldwasser–Micali (Blum primes), with BigInt. BGN and Castagnos–Laguillaumie are labelled models: exponent arithmetic and the analogue group (Z/p²Z)*. Original papers: <a href="https://doi.org/10.1145/359340.359342">RSA 1978</a>, <a href="https://doi.org/10.1109/TIT.1985.1057074">ElGamal 1985</a>, <a href="https://doi.org/10.1016/0022-0000(84)90070-9">Goldwasser–Micali 1984</a>, <a href="https://doi.org/10.1007/978-3-540-30576-7_18">BGN 2005</a>, <a href="https://eprint.iacr.org/2015/047">Castagnos–Laguillaumie 2015</a>.',
+  cardResult:()=>`z = ${f(Number(R.dl.m)/40)} exactly (ElGamal, CL); BGN model p(z) = ${f(R.ybgn)}; ReLU never`,
+  steps };
+steps.push(LS.cardStep(cfg,{budget:"—",scale:"integers",name:"Classic PHE"}));
+LS.start(cfg);
+})();
+</script>
+</body>
+</html>

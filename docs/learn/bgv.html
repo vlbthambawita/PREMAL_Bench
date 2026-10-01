@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BGV Step by Step</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lesson.css">
+</head>
+<body>
+<div id="app"></div>
+<script src="lessons.js"></script>
+<script src="cards/bgv.js"></script>
+<script src="lesson.js"></script>
+<script src="engines/bfv.js"></script>
+<script>
+(function(){
+"use strict";
+const {svg,tile,lock,lbl,small,pop,fade,draw,slide,blink,growX,f,fe,big}=LS;
+const t=257n, G=BGV.make({N:4,t,levels:10,primeBits:31}), RC=EXACT.reluCoeffs(t);
+const SX=10, SW=4, SB=40, L=G.L;
+let R;
+const bits=v=>LS.bits(v), qb=l=>bits(G.q[l]);
+
+function compute(inp){
+  const x=[inp.x1,inp.x2], xi=x.map(v=>BigInt(Math.round(v*SX))), wi=LS.W.map(v=>BigInt(Math.round(v*SW))), bi=BigInt(Math.round(LS.B*SB));
+  const zi=xi[0]*wi[0]+xi[1]*wi[1]+bi, zs=LS.cmod(zi,t), reluI=zs>0n?zs:0n;
+  const slotsX=[xi[0],xi[1],xi[0],xi[1]], m=G.encode(slotsX), ct=G.encrypt(m), ph=G.phase(ct);
+  const c4=G.mulPlain(ct,G.encode([wi[0],wi[1],wi[0],wi[1]])), rot=G.rotate(c4), cz=G.addPlain(G.add(c4,rot),G.encode([bi,bi,bi,bi]));
+  const sqRaw=G.relin(G.tensor(cz,cz)), sqSw=G.modSwitch(sqRaw);
+  const t0=Date.now(), ev=EXACT.evalPoly(G,cz,RC), ms=Date.now()-t0, yv=G.decrypt(ev.ct)[0];
+  const tree=[1,2,4,8,16,32,64,128,256].map((k,j)=>({k,depth:j,l:ev.pw[k].l,qbits:qb(ev.pw[k].l),nbits:bits(G.noise(ev.pw[k])),val:G.decrypt(ev.pw[k])[0]}));
+  R={x,nn:LS.neuron(x),xi,wi,bi,zi,zs,reluI,slotsX,m,ct,ph,phT:ph.map(v=>LS.cmod(v,t)),dm:G.decrypt(ct),
+     n3:G.noise(ct),v4:G.decrypt(c4),n4:G.noise(c4),vz:G.decrypt(cz),nz:G.noise(cz),
+     sqRaw,sqSw,nsq:G.noise(sqRaw),nsw:G.noise(sqSw),vsq:G.decrypt(sqRaw)[0],vsw:G.decrypt(sqSw)[0],phSq:G.phase(sqRaw)[0],phSw:G.phase(sqSw)[0],
+     ev,ms,yv,ny:G.noise(ev.ct),ly:ev.ct.l,tree,y:Number(yv)/SB};
+  return R;
+}
+/* register: left = top bit of q_l, noise/message at the bottom (right). scale 2 px per bit */
+function reg(x,y,qbits,nbits,h,cls,px=2){ const w=qbits*px, nw=Math.max(4,nbits*px);
+  return `<g class="${cls||""}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="none" stroke="currentColor"/><rect x="${x}" y="${y}" width="${w-nw}" height="${h}" fill="currentColor" opacity=".05"/>
+    <g class="c-noise"><rect class="nz" x="${x+w-nw}" y="${y}" width="${nw}" height="${h}" fill="currentColor" opacity=".55"/></g>
+    <g class="c-client"><rect x="${x+w-Math.min(nw,9*px)}" y="${y}" width="${Math.min(nw,9*px)}" height="${h}" fill="currentColor" opacity=".7"/></g></g>`; }
+
+const steps=[
+{ key:"Idea", who:"both", whoT:"the task", at:0, budget:"—", scale:"×10, ×4, ×40", err:()=>0,
+  title:"Same integers, message at the bottom",
+  cap:()=>`BGV computes exactly the same integer neuron as BFV (40·z = ${big(R.zi)}). The one thing that changes is <b>where the message sits</b> inside a ciphertext.`,
+  scene(){ return svg(300,`${lbl(40,40,"BFV:  c₀ + c₁·s = Δ·m + v","class=\"mono\" font-weight=\"700\"")}
+    <g class="r1"><rect x="40" y="54" width="720" height="40" rx="4" fill="none" stroke="currentColor"/><g class="c-client"><rect x="40" y="54" width="40" height="40" fill="currentColor" opacity=".55"/></g><g class="c-noise"><rect x="740" y="54" width="20" height="40" fill="currentColor" opacity=".7"/></g>
+    <text x="400" y="79" text-anchor="middle" font-size="12.5" fill="currentColor">message on top · noise below · budget in between</text></g>
+    ${lbl(40,140,"BGV:  c₀ + c₁·s = m + t·e","class=\"mono\" font-weight=\"700\"")}
+    <g class="r2"><rect x="40" y="154" width="720" height="40" rx="4" fill="none" stroke="currentColor"/><g class="c-noise"><rect x="700" y="154" width="60" height="40" fill="currentColor" opacity=".45"/></g><g class="c-client"><rect x="742" y="154" width="18" height="40" fill="currentColor" opacity=".8"/></g>
+    <text x="370" y="179" text-anchor="middle" font-size="12.5" fill="currentColor">empty top bits · noise t·e mixed in with the message at the bottom</text></g>
+    ${small(40,226,"In BGV the message is the remainder mod t of a small value. Decrypting is just “reduce mod t”.")}
+    ${small(40,246,"Noise is controlled by cutting the modulus q down, prime by prime: modulus switching.")}
+    ${small(40,270,"Inputs: 10·x = ["+R.xi.map(big).join(", ")+"],  4·w = ["+R.wi.map(big).join(", ")+"],  40·b = "+big(R.bi))}`,"Two registers contrast BFV with the message in the high bits and BGV with the message in the low bits mixed with noise that is a multiple of t."); },
+  play(){ fade(".r1",0); slide(".r2",0,-40,500); },
+  math:()=>`<div class="formula">BFV: decrypt = round(t·(c₀ + c₁·s)/q) mod t      BGV: decrypt = (c₀ + c₁·s mod q) mod t</div><p>Both are exact. They are equivalent up to a scaling of the ciphertext, which is why libraries such as OpenFHE implement both on the same machinery.</p>`,
+  explain:()=>`<p>BGV (Brakerski–Gentry–Vaikuntanathan, 2012) and BFV are twins. Both encrypt integers modulo a plaintext modulus t, both pack slots the same way, and both compute exactly. Lesson 3 ran the neuron in BFV; here we run the same numbers in BGV.</p><p>The difference is the layout of a ciphertext. BFV scales the message up by Δ = q/t, so it sits in the top bits. BGV leaves the message at the bottom and makes every noise term a multiple of t: c₀ + c₁·s = m + t·e. Reducing modulo t wipes out the noise.</p><p>That small change decides how noise is managed. BFV lets noise grow towards the message. BGV keeps the noise small by repeatedly dividing the whole ciphertext by one prime of the modulus.</p>`},
+{ key:"Prime chain", who:"client", whoT:"client", at:0, budget:()=>`level ${L} of ${L}`, scale:"q = p₀·p₁⋯p₁₀", err:()=>0,
+  title:"Keys and a chain of primes",
+  cap:()=>`The modulus is a product of ${L+1} primes of 31 bits, q = ${qb(L)} bits. Every prime is ≡ 1 (mod 257), so dividing by one of them leaves the message unchanged.`,
+  scene(){ const bw=64;
+    return svg(300,`${lbl(40,34,"MODULUS CHAIN  q_l = p₀ · p₁ ⋯ p_l","font-weight=\"700\"")}
+      ${G.primes.map((p,i)=>`<g class="pr">${tile(40+i*(bw+2),52,bw,46,"p"+LS.sub(i),"c-client","",14)}</g>`).join("")}
+      ${G.primes.map((p,i)=>small(40+i*(bw+2)+bw/2,116,(p%t===1n?"≡1":"!"),'text-anchor="middle"')).join("")}
+      ${small(40,138,"each block is one 31-bit prime; ≡1 means p ≡ 1 (mod 257)")}
+      ${lbl(40,180,"Example primes","font-weight=\"700\"")}
+      ${G.primes.slice(0,4).map((p,i)=>`<g class="pp">${lbl(40,206+i*20,`p${LS.sub(i)} = ${p}  = 257 · ${(p-1n)/t} + 1`,'class="mono"')}</g>`).join("")}
+      ${lbl(470,180,"Keys","font-weight=\"700\"")}
+      ${lbl(470,206,"s(X) = "+LS.poly.str(G.K.s),'class="mono c-client"')}
+      ${lbl(470,230,"public key: (−a·s + t·e, a)",'class="mono"')}
+      ${small(470,252,"the key noise is also a multiple of t")}`,"Eleven 31-bit primes form the modulus chain; each is congruent to one modulo 257."); },
+  play(){ pop(".pr",0,60); fade(".pp",800,150); },
+  math:()=>`<div class="formula">q = ${G.primes.map(String).slice(0,3).join(" · ")} ⋯  (${qb(L)} bits)</div><div class="formula">key-switching modulus P = 2^${bits(G.P)-1}</div><p>The primes are found by searching downwards from 2³¹ through numbers of the form 257·k + 1 and testing each with Miller–Rabin.</p>`,
+  explain:()=>`<p>BGV's modulus is not one number but a product of primes. Each prime is one level, like CKKS levels, but its job is different: dividing by it removes noise rather than rescaling a real-number scale.</p><p>For the message to survive the division, the rounding must not change the value modulo t. BGV rounds to the nearest multiple-of-t correction, and if each prime p satisfies p ≡ 1 (mod t), dividing by p is the same as multiplying the message by p⁻¹ ≡ 1. That is why every prime in the chain is of the form 257·k + 1.</p><p>Real BGV in HElib or OpenFHE uses the same structure with 50–60-bit primes and tracks a correction factor when primes are not ≡ 1 mod t.</p>`},
+{ key:"Encrypt", who:"client", whoT:"client", at:0.5, budget:()=>`level ${L} of ${L}`, scale:"m + t·e", err:()=>0,
+  title:"Encrypt: message plus a multiple of t",
+  cap:()=>`Decrypting gives the small number c₀ + c₁·s = m + t·e, here up to ${bits(R.n3)} bits. Reducing it mod 257 gives back the slots exactly.`,
+  scene(){ return svg(320,`${lbl(40,34,"c₀ + c₁·s mod q  (coefficients, centred)","font-weight=\"700\"")}
+      ${R.ph.map((v,i)=>`<g class="ph">${tile(40+i*180,48,170,44,big(v),"c-noise","",14)}</g>`).join("")}
+      <g class="c-muted ar"><path d="M40,100 v8 h710 v-8 M395,108 V140" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#ahm)"/></g>${small(405,128,"mod 257")}
+      ${R.phT.map((v,i)=>`<g class="pt">${tile(40+i*180,148,170,40,big(v),"c-client")}</g>`).join("")}
+      ${small(40,206,"these are the polynomial coefficients m₀…m₃; the slots are")}
+      ${R.dm.map((v,i)=>`<g class="dm">${tile(40+i*92,216,84,40,big(v),"c-client")}</g>`).join("")}
+      <g class="rg">${reg(420,224,qb(L)/2,bits(R.n3),30)}</g>${small(420,276,"whole modulus "+qb(L)+" bits (drawn at half scale) · used: "+bits(R.n3)+" bits")}`,"Decrypted coefficients are small numbers mixing message and noise; reducing them modulo 257 recovers the message coefficients and slots."); },
+  play(){ pop(".ph",0,90); fade(".ar",500); pop(".pt",800,90); pop(".dm",1300,90); fade(".rg",1700); },
+  math:()=>`<div class="formula">c₀ + c₁·s = [${R.ph.map(big).join(", ")}]</div><div class="formula">mod 257 → [${R.phT.map(big).join(", ")}] = m(X) = ${LS.poly.str(R.m)}</div><p>Fresh noise is t·(e₀ + e·u + e₁·s): a few multiples of 257.</p>`,
+  explain:()=>`<p>Encryption adds the message to an encryption of zero whose noise is t times a small polynomial. Decrypting c₀ + c₁·s therefore gives m + t·e, a number of only ${bits(R.n3)} bits inside a modulus of ${qb(L)} bits.</p><p>The client reduces each coefficient modulo 257 and gets the message polynomial back, then decodes the slots: ${R.dm.map(big).join(", ")}. No scaling, no rounding: the multiple of t simply disappears.</p><p>Decryption works as long as m + t·e stays smaller than q/2. In BGV, “noise budget” means how far |m + t·e| is from q/2.</p>`},
+{ key:"Linear", who:"server", whoT:"server", at:1, budget:()=>`level ${L} of ${L}`, scale:"m + t·e", err:()=>0,
+  title:"The linear part, exactly as in BFV",
+  cap:()=>`× w, rotate, add, + b: the slots become 40·z = <b>${big(R.vz[0])}</b>. The noise grows from ${bits(R.n3)} to ${bits(R.nz)} bits, still tiny next to q.`,
+  scene(){ const row=(y,v,name)=>`${lbl(40,y+28,name)}<g class="rw">${v.map((x,i)=>tile(250+i*100,y,90,44,big(x),"c-server")).join("")}</g>`;
+    return svg(260,`${row(20,R.dm,"slots")}${row(84,R.v4,"× w")}${row(148,R.vz,"rotate, add, + b")}
+      ${small(680,48,bits(R.n3)+" bits")}${small(680,112,bits(R.n4)+" bits")}${small(680,176,bits(R.nz)+" bits")}${small(680,26,"noise |m + t·e|")}
+      ${small(40,226,"plaintext products and additions grow the noise a little; no modulus switch is needed yet")}`,"Slots, products and the final 40z in every slot, with the noise size in bits after each operation."); },
+  play(){ LS.A(".rw",[{opacity:0,transform:"translateX(-20px)"},{opacity:1,transform:"none"}],{s:400,d:500}); },
+  math:()=>`<table class="nums"><thead><tr><th>after</th><th>slots</th><th>noise bits</th></tr></thead><tbody><tr><td>encrypt</td><td class="v">[${R.dm.map(big).join(", ")}]</td><td class="v">${bits(R.n3)}</td></tr><tr><td>× w</td><td class="v">[${R.v4.map(big).join(", ")}]</td><td class="v">${bits(R.n4)}</td></tr><tr><td>rotate + add + b</td><td class="v">[${R.vz.map(big).join(", ")}]</td><td class="v">${bits(R.nz)}</td></tr></tbody></table>`,
+  explain:()=>`<p>The linear part is identical to BFV: the same slot encoding, the same plaintext multiplication, the same X → X⁵ rotation with key switching, the same additions. The result is exactly 40·z = ${big(R.vz[0])} in every slot.</p><p>Key switching in BGV needs one care point. The rounding when dividing by the special modulus P must also be a multiple of t, so the extra noise stays invisible after reducing mod t. The engine uses the same multiple-of-t rounding as modulus switching.</p>`},
+{ key:"Mod switch", who:"server", whoT:"server", at:1, budget:()=>`level ${L-1} of ${L}`, scale:"q → q/p₁₀", err:()=>0,
+  title:"Modulus switching: divide noise away",
+  cap:()=>`Squaring z makes the noise ${bits(R.nsq)} bits. Dividing the ciphertext by the top prime p₁₀ (31 bits) shrinks it to <b>${bits(R.nsw)} bits</b>, and the slots still decrypt to ${big(R.vsw)} ≡ ${big(R.zs)}² (mod 257).`,
+  scene(){ return svg(330,`${lbl(40,34,"after z · z (level "+L+", q = "+qb(L)+" bits)","font-weight=\"700\"")}
+      <g class="ra">${reg(40,46,qb(L),bits(R.nsq),36)}</g>${small(40+qb(L)*2+8,70,bits(R.nsq)+"-bit noise")}
+      <g class="c-noise cut"><rect x="${40+qb(L-1)*2}" y="40" width="${(qb(L)-qb(L-1))*2}" height="48" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="5 4"/>${small(40+qb(L)*2,104,"÷ p₁₀: the lowest 31 bits go away",'text-anchor="end"')}</g>
+      <g class="c-muted ar"><line x1="400" y1="114" x2="400" y2="160" stroke="currentColor" stroke-width="2" marker-end="url(#ahm)"/></g>${small(410,142,"c ← (c + δ)/p₁₀, with δ ≡ −c (mod p₁₀) and δ ≡ 0 (mod 257)")}
+      ${lbl(40,190,"after switching (level "+(L-1)+", q = "+qb(L-1)+" bits)","font-weight=\"700\"")}
+      <g class="rb">${reg(40,202,qb(L-1),bits(R.nsw),36)}</g>${small(40+qb(L-1)*2+8,226,bits(R.nsw)+"-bit noise")}
+      ${lbl(40,280,"constant coefficient of c₀ + c₁·s:  "+big(R.phSq)+"  →  "+big(R.phSw),'class="mono"')}
+      ${small(40,302,"both are ≡ "+big(LS.cmod(R.phSq,t))+" (mod 257): the message is untouched")}`,"Squaring grows the noise; dividing the ciphertext by the top 31-bit prime removes those bits, shrinking both the modulus and the noise, while the value modulo 257 is preserved."); },
+  play(){ fade(".ra",0); blink(".cut",600); fade(".ar",1500); slide(".rb",0,-40,1800); },
+  math:()=>`<div class="formula">noise before: ${bits(R.nsq)} bits (q = ${qb(L)} bits)   after: ${bits(R.nsw)} bits (q = ${qb(L-1)} bits)</div><div class="formula">z² mod 257 = ${big(R.vsq)} → ${big(R.vsw)}</div><p>The correction δ is chosen as t·k with t·k ≡ −c (mod p). Then (c + δ)/p is an integer, and since p ≡ 1 (mod t) it is ≡ c (mod t).</p>`,
+  explain:()=>`<p>Multiplying two ciphertexts multiplies their noises: ${bits(R.nz)}-bit noise squared becomes about ${bits(R.nsq)} bits. Left alone, a few more multiplications would overflow q.</p><p><b>Modulus switching</b> divides every coefficient of the ciphertext by the top prime p₁₀ and drops it from the modulus. The noise is divided by the same factor, falling to ${bits(R.nsw)} bits. To keep the message, the division rounds to a nearby value with the same remainder mod t.</p><p>This is BGV's answer to CKKS rescaling, with a different purpose. CKKS divides to restore a real-number scale. BGV divides to keep noise at a constant size after every multiplication, which is what made leveled FHE without bootstrapping possible (the title of the BGV paper).</p>`},
+{ key:"ReLU", who:"server", whoT:"server", at:1, budget:()=>`level ${R.ly} of ${L}`, scale:"m + t·e", err:()=>0,
+  title:"Exact ReLU, one prime per depth",
+  cap:()=>`The same degree-256 polynomial as in BFV, ${R.ev.mults} multiplications at depth ${R.ev.depth}. After each multiplication one prime is dropped, so the noise stays around ${R.tree[4].nbits} bits while the modulus shrinks.`,
+  scene(){ return svg(360,`${lbl(40,30,"power","font-weight=\"700\"")}${lbl(110,30,"level","font-weight=\"700\"")}${lbl(180,30,"modulus q (bars) and noise (orange)","font-weight=\"700\"")}
+      ${R.tree.map((n,j)=>`<g class="tr">${lbl(40,64+j*32,"z"+LS.sup(n.k),'class="mono"')}${lbl(110,64+j*32,"L"+n.l,'class="mono"')}${reg(180,48+j*32,n.qbits,n.nbits,22,"",1.5)}${small(186+n.qbits*1.5,64+j*32,n.qbits+" / "+n.nbits+" bits")}</g>`).join("")}
+      ${small(40,350,"the noise (orange) stays the same size; the ciphertext gets shorter with every level")}`,"For each power of z, its level, the remaining modulus size and the noise size: the noise stays constant while the modulus shrinks by one prime per depth."); },
+  play(){ LS.A(".tr",[{opacity:0,transform:"translateX(-16px)"},{opacity:1,transform:"none"}],{s:120,d:450}); },
+  math:()=>`<table class="nums"><thead><tr><th>power</th><th>level</th><th>q bits</th><th>noise bits</th><th>slot</th></tr></thead><tbody>${R.tree.map(n=>`<tr><td>z${LS.sup(n.k)}</td><td class="v">${n.l}</td><td class="v">${n.qbits}</td><td class="v">${n.nbits}</td><td class="v">${big(n.val)}</td></tr>`).join("")}</tbody></table><p>Measured: ${R.ms} ms for ${R.ev.mults} multiplications with N = 4.</p>`,
+  explain:()=>`<p>The non-linear step is the same exact interpolation polynomial as in Lesson 3: over Z₂₅₇, ReLU has degree 256. Each of the ${R.ev.mults} multiplications is followed by a modulus switch, and operands at different levels are first switched down to the same level.</p><p>The table shows the BGV rhythm. The noise stays near ${R.tree[4].nbits} bits after every multiplication, while the modulus loses one prime per depth. After depth 8, the ciphertext lives at level ${R.ly}, with a modulus of ${qb(R.ly)} bits instead of ${qb(L)}.</p><p>BFV reached the same answer by starting with a large q and letting noise grow. Both need room for depth 8. BGV pays for it in primes, BFV in bits of budget.</p>`},
+{ key:"Decrypt", who:"client", whoT:"client", at:0, budget:()=>`level ${R.ly} of ${L}`, scale:"÷ 40", err:()=>0,
+  title:"Decrypt: exactly 0.35, from a smaller ciphertext",
+  cap:()=>`(c₀ + c₁·s) mod 257 = <b>${big(R.yv)}</b>, so y = ${big(R.yv)}/40 = <b>${f(R.y)}</b>. The returned ciphertext uses a ${qb(R.ly)}-bit modulus, ${Math.round(100*qb(R.ly)/qb(L))}% of the fresh ${qb(L)} bits.`,
+  scene(){ const B1=2*4*qb(L)/8, B2=2*4*qb(R.ly)/8;
+    return svg(260,`<g class="c-client big"><text x="40" y="58" font-size="13" fill="currentColor" font-weight="700">CLIENT DECRYPTS</text><text x="40" y="104" font-size="40" font-family="var(--mono)" fill="currentColor">${big(R.yv)} ÷ 40 = ${f(R.y)}</text></g>
+      <g class="c-ok big"><text x="560" y="58" font-size="13" fill="currentColor" font-weight="700">TRUE ReLU(z)</text><text x="560" y="104" font-size="40" font-family="var(--mono)" fill="currentColor">${f(R.nn.relu)}</text></g>
+      ${lbl(40,152,"Ciphertext size (toy, N = 4)","font-weight=\"700\"")}
+      ${lbl(40,186,"fresh, level "+L)}<g class="c-client"><rect class="eb" x="220" y="170" width="${B1*1.2}" height="22" rx="3" fill="currentColor" opacity=".6"/></g>${small(226+B1*1.2,186,B1+" bytes")}
+      ${lbl(40,222,"result, level "+R.ly)}<g class="c-client"><rect class="eb" x="220" y="206" width="${B2*1.2}" height="22" rx="3" fill="currentColor" opacity=".6"/></g>${small(226+B2*1.2,222,B2+" bytes")}`,"The decrypted value divided by 40 equals the true ReLU; the result ciphertext is much smaller than the fresh one."); },
+  play(){ pop(".big",0,250); growX(".eb",600,200); },
+  math:()=>`<div class="formula">c₀ + c₁·s (constant coeff.) = ${big(G.phase(R.ev.ct)[0])}  →  mod 257 = slot polynomial  →  slot = ${big(R.yv)}</div><div class="formula">y = ${big(R.yv)} / 40 = ${f(R.y,6)}</div>`,
+  explain:()=>`<p>The client reduces c₀ + c₁·s modulo 257 and decodes: ${big(R.yv)}, so y = ${f(R.y)}, the exact ReLU. BGV and BFV agree to the last digit, as they must.</p><p>A side effect of modulus switching is that results come back smaller. The output ciphertext uses ${qb(R.ly)} bits per coefficient instead of ${qb(L)}. For a server answering many queries, that saves bandwidth.</p><p>BGV is the scheme of HElib and one of OpenFHE's three main schemes. It is preferred when exact integer arithmetic with many multiplications is needed, for example in private set intersection or quantized-integer models.</p>`}
+];
+const cfg={ id:"bgv", title:"BGV Step by Step", compute, setup:()=>G.keygen(),
+  inputNote:"x is rounded to one decimal (×10). Keep |40·z| ≤ 128 so nothing wraps modulo 257.",
+  status:{budgetLabel:"Modulus level", scaleLabel:"Encoding", errLabel:"Error so far"},
+  footer:'Real toy BGV in your browser: N = 4, t = 257, modulus = 11 primes of 31 bits (all ≡ 1 mod 257), key-switching modulus a power of two above q. Insecure sizes, real algebra. Scheme: Brakerski, Gentry, Vaikuntanathan, <a href="https://eprint.iacr.org/2011/277">ITCS 2012</a>.',
+  cardResult:()=>`${big(R.yv)}/40 = ${f(R.y)}, exact`, steps };
+steps.push(LS.cardStep(cfg,{name:"BGV",budget:()=>`level ${R.ly} of ${L}`,scale:"—",err:()=>0,
+  extra:()=>`<div class="next"><div><b>BFV</b><br>Message on top, one big modulus, no switching. Same answers.</div><div><b>Generalized BFV</b><br>Polynomial plaintext modulus: fewer slots, far more precision.</div><div><b>TFHE</b><br>Exact ReLU by lookup table instead of a degree-256 polynomial.</div></div>`,
+  math:()=>`<p>Toy parameters: N = 4, t = 257, 11 primes of 31 bits. Real BGV uses N = 2¹³–2¹⁶ and 30–60-bit primes.</p>`,
+  explain:()=>`<p>BGV matched BFV exactly. What differs is the bookkeeping: noise is kept constant by switching to smaller moduli, so the ciphertext shrinks as the computation goes deeper.</p>`}));
+LS.start(cfg);
+})();
+</script>
+</body>
+</html>

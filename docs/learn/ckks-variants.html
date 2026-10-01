@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CKKS Variants Step by Step</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lesson.css">
+</head>
+<body>
+<div id="app"></div>
+<script src="lessons.js"></script>
+<script src="cards/ckks-variants.js"></script>
+<script src="lesson.js"></script>
+<script src="engines/ckks.js"></script>
+<script src="engines/ckks-extra.js"></script>
+<script>
+(function(){
+"use strict";
+const {svg,tile,lock,lbl,small,arrow,pop,fade,draw,slide,blink,growX,f,fe,sup,big}=LS;
+const P_=LS.poly, X=CKKSX;
+const addI=(a,b)=>a.map((v,i)=>v+b[i]);   // integer (unreduced) addition
+const W=LS.W, B=LS.B;
+/* ---------- engines ---------- */
+const C=CKKS.make({N:4,deltaBits:20,q0Bits:30,levels:3,pBits:100});          // power-of-two toy (lesson 1)
+const NB=128, C64=CKKS.make({N:NB,deltaBits:20,q0Bits:30,levels:1,pBits:60});   // bigger ring for bootstrapping statistics
+/* RNS toy: N=4, primes q0≈2^30, q1,q2≈2^20, all ≡ 1 mod 8 */
+const QP=[X.primesNear(30,1,8)[0], ...X.primesNear(20,2,8)];
+const QR=[QP[0], QP[0]*QP[1], QP[0]*QP[1]*QP[2]];  // modulus at level 0,1,2
+const DN=2**20;
+let K2={};
+function setup(){
+  C.keygen();
+  C64.keygen();
+  // sparse key (Hamming weight 8) for C64
+  const sp=new Array(NB).fill(0n); let h=0; while(h<8){ const i=LS.randInt(0,NB-1); if(sp[i]===0n){ sp[i]=LS.rng()<.5?1n:-1n; h++; } }
+  K2.sparse=sp; K2.swk=X.swkFromTo(C64, C64.K.s, sp);
+}
+let R;
+function rnsEncrypt(m){ const Q=QR[2], u=Array.from({length:4},()=>LS.tern()), e0=Array.from({length:4},()=>LS.smallErr()), e1=Array.from({length:4},()=>LS.smallErr());
+  const a=Array.from({length:4},()=>LS.randBig(Q)), e=Array.from({length:4},()=>LS.smallErr());
+  const pk0=P_.add(P_.neg(P_.mul(a,C.K.s,Q)),e,Q);
+  return [P_.add(P_.add(P_.mul(pk0,u,Q),e0,Q),m,Q), P_.add(P_.mul(a,u,Q),e1,Q)]; }
+const resid=(v,p)=>LS.mod(v,p);
+function compute(inp){
+  const x=[inp.x1,inp.x2], n=LS.neuron(x);
+  /* --- RNS: per-prime multiply by w, then CRT recombine, then rescale by q2 --- */
+  const m=C.encode(x), ct=rnsEncrypt(m), pw=C.encode(W);
+  const res0=QP.map(p=>resid(ct[0][0],p));
+  const prodPer=QP.map(p=>[0,1].map(k=>P_.mul(ct[k].map(v=>resid(v,p)),pw.map(v=>resid(v,p)),p).map(v=>LS.mod(v,p))));
+  const prodBig=[0,1].map(k=>P_.mul(ct[k],pw,QR[2]));
+  const recomb=[0,1].map(k=>[0,1,2,3].map(i=>X.crt(prodPer.map(pp=>pp[k][i]),QP)));
+  const crtOk=recomb.every((p,k)=>p.every((v,i)=>LS.cmod(v-prodBig[k][i],QR[2])===0n));
+  // rescale by last prime q2, per residue: (c - [c]_q2) * q2^-1 mod qi  (shown as big-int result)
+  const q2=QP[2], rs=prodBig.map(p=>p.map(v=>{ const r=LS.cmod(v,q2); return LS.cmod((v-r)/q2, QR[1]); }));
+  const decRaw=c=>addI(c[0],P_.mul(c[1],C.K.s,null));
+  const rsDec=P_.red(decRaw(rs),QR[1]);
+  const scaleNominal=DN, scaleExact=DN*DN/Number(q2);
+  const vNom=C.decode(rsDec,BigInt(scaleNominal)), vEx=C.decodeC(rsDec,1n).map(v=>v[0]/scaleExact);
+  /* --- complex packing: slot = x1 + i x2, weight = w1 - i w2 --- */
+  const mc=C.encode([[x[0],x[1]],[x[0],x[1]]]), ctc=C.encrypt(mc);
+  const pwc=C.encode([[W[0],-W[1]],[W[0],-W[1]]]);
+  const cm=C.rescale(C.mulPt(ctc,pwc)), cconj=C.conjugate(cm), csum=C.add(cm,cconj), chalf=C.rescale(C.mulPt(csum,C.cst(0.5))), cz=C.addPt(chalf,C.encode([B,B]));
+  /* --- IND-CPA-D attack on a fresh level-0 ciphertext --- */
+  let atk=null, tries=0;
+  while(!atk && tries<30){ tries++; const c0=C.encrypt(C.encode(x),0); const inv=X.polyInvPow2(c0.c[1],30); if(inv) atk={ct:c0,inv}; }
+  const q0=C.q[0], dm=C.decRaw(atk.ct), shared=C.decodeC(dm);           // client shares its decrypted (complex) slots
+  const reenc=C.encode(shared.map(v=>v));                                   // attacker re-encodes the shared numbers
+  const sRec=P_.mul(P_.sub(reenc,atk.ct.c[0],q0),atk.inv,q0);
+  const sOk=sRec.every((v,i)=>v===C.K.s[i]);
+  const flood=Array.from({length:4},()=>BigInt(LS.randInt(-4096,4096)));
+  const dmF=P_.add(dm,flood,q0), sharedF=C.decodeC(dmF), reencF=C.encode(sharedF);
+  const sRecF=P_.mul(P_.sub(reencF,atk.ct.c[0],q0),atk.inv,q0);
+  /* --- bootstrapping: ModRaise on a level-0 ciphertext of the 64-ring --- */
+  const ctB=C64.encrypt(C64.encode(new Array(NB/2).fill(0).map((_,j)=>j%2?x[1]:x[0])),0);
+  const tInt=s=>addI(ctB.c[0],P_.mul(ctB.c[1],s,null));   // integer (not reduced) decryption
+  const Ivals=s=>{ const t=tInt(s); return t.map(v=>Number(LS.fdiv(v-LS.cmod(v,C64.q[0])+C64.q[0]/2n,C64.q[0]))); };
+  const Idense=Ivals(C64.K.s);
+  // sparse-secret encapsulation: switch the c1 part to the sparse key
+  const swkd=C64.ks(ctB.c[1],K2.swk,0); const ctS={c:[P_.add(ctB.c[0],swkd[0],C64.q[0]),swkd[1]],l:0};
+  const tS=addI(ctS.c[0],P_.mul(ctS.c[1],K2.sparse,null));
+  const Isparse=tS.map(v=>Number(LS.fdiv(v-LS.cmod(v,C64.q[0])+C64.q[0]/2n,C64.q[0])));
+  const sparseDec=C64.decode(P_.red(tS,C64.q[0]))[0];
+  const hw=s=>s.filter(v=>v!==0n).length;
+  // EvalMod: (q/2π) sin(2π t/q) error for our message coefficients (plaintext computation)
+  const q0n=Number(C64.q[0]), mco=P_.red(tInt(C64.K.s),C64.q[0]).map(Number);
+  const sinErr=mco.map(v=>Math.abs(q0n/(2*Math.PI)*Math.sin(2*Math.PI*v/q0n)-v));
+  const maxSinErr=Math.max(...sinErr), relSin=maxSinErr/DN;
+  const maxAbs=a=>Math.max(...a.map(Math.abs));
+  // META-BTS precision model: one pass leaves error e1 ~ maxSinErr; second pass bootstraps e1 scaled up
+  const p1=-Math.log2(maxSinErr/DN), p2=Math.min(2*p1-1, 52);
+  R={x,n,QP,QR,m,ct,res0,prodPer,prodBig,recomb,crtOk,q2,scaleNominal,scaleExact,vNom,vEx,
+     cm:C.valC(cm),cconj:C.valC(cconj),csum:C.valC(csum),cz:C.valC(cz),
+     atk,dm,shared,reenc,sRec,sOk,flood,sharedF,sRecF,tries,
+     Idense,Isparse,hwD:hw(C64.K.s),hwS:hw(K2.sparse),maxD:maxAbs(Idense),maxS:maxAbs(Isparse),sparseDec,
+     maxSinErr,relSin,p1,p2,mco};
+  return R;
+}
+/* ---------- scenes ---------- */
+const box=(x,y,w,h,t,cls,sub)=>`<g class="${cls} bx"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8" fill="currentColor" fill-opacity=".08" stroke="currentColor" stroke-width="2"/><text x="${x+w/2}" y="${y+(sub?h/2-2:h/2+5)}" text-anchor="middle" font-size="13.5" font-weight="700" fill="currentColor">${t}</text>${sub?`<text x="${x+w/2}" y="${y+h/2+15}" text-anchor="middle" font-size="11.5" fill="currentColor" class="c-muted">${sub}</text>`:""}</g>`;
+const tag=(x,y,t,cls="c-noise")=>`<g class="${cls} tg"><rect x="${x}" y="${y}" width="${t.length*6.6+16}" height="22" rx="11" fill="currentColor" fill-opacity=".14"/><text x="${x+8}" y="${y+15}" font-size="11.5" font-weight="700" fill="currentColor">${t}</text></g>`;
+const cplx=v=>`${f(v[0],3)} ${v[1]<-5e-4?"−":"+"} ${f(Math.abs(v[1]),3)}i`;
+const steps=[
+{ key:"Map", who:"both", whoT:"overview", at:0.5, budget:4, scale:"Δ = 2²⁰", err:()=>0,
+  title:"Nine variants, one pipeline",
+  cap:()=>"Every variant keeps CKKS arithmetic but changes one stage of the pipeline you saw in Lesson 1. The coloured tags show which stage each one touches.",
+  scene(){ const st=[["Encode","slots → polynomial"],["Encrypt","RLWE ciphertext"],["Multiply","× w, rescale"],["Decrypt","read the result"],["Bootstrap","refill levels"]];
+    let g=""; st.forEach((s,i)=>{ const x=20+i*158; g+=box(x,56,140,64,s[0],"c-server",s[1]); if(i<4) g+=arrow(x+142,88,x+156,88,"ahm"); });
+    g+=tag(28,138,"conjugate-invariant","c-client")+tag(28,166,"complex packing","c-client");
+    g+=tag(186,138,"RNS (word primes)")+tag(186,166,"sparse-secret","c-noise");
+    g+=tag(344,138,"reduced-error rescale")+tag(344,166,"grafting");
+    g+=tag(502,138,"IND-CPA-D: flooding","c-warn");
+    g+=tag(660,138,"META-BTS")+tag(660,166,"SHIP")+tag(660,194,"PaCo")+tag(660,222,"sparse-secret");
+    g+=`<g class="c-muted"><path pathLength="1" d="M722,54 C722,2 90,2 90,50" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="0.01 0.012" marker-end="url(#ahm)"/></g>`+small(406,38,"a bootstrapped ciphertext goes back to work",'text-anchor="middle"');
+    g+=small(20,276,"Same neuron as Lesson 1: x = ["+R.x.join(", ")+"], w = [0.5, −0.25], b = 0.1, so z = "+f(R.n.z,2)+".");
+    return svg(290,g,"The CKKS pipeline encode, encrypt, multiply, decrypt and bootstrap, with each variant tagged on the stage it changes."); },
+  play(){ pop(".bx",0,120); fade(".tg",700,70); LS.fade("path",1300); },
+  math:()=>`<table class="nums"><thead><tr><th>Variant</th><th>Stage</th><th>Main idea</th></tr></thead><tbody>
+    <tr><td>RNS-CKKS</td><td>everything</td><td>store each big coefficient as residues mod word-size primes</td></tr>
+    <tr><td>Reduced-error CKKS</td><td>rescale</td><td>track the true scale after dividing by a prime</td></tr>
+    <tr><td>Conjugate-invariant CKKS</td><td>encode</td><td>a real-only ring with N real slots</td></tr>
+    <tr><td>IND-CPA-D secure CKKS</td><td>decrypt</td><td>add flooding noise before sharing a result</td></tr>
+    <tr><td>Sparse-secret encapsulation</td><td>bootstrap</td><td>switch to a sparse key only inside bootstrapping</td></tr>
+    <tr><td>META-BTS</td><td>bootstrap</td><td>bootstrap the error again to double precision</td></tr>
+    <tr><td>Grafting</td><td>moduli</td><td>scale no longer tied to the prime sizes</td></tr>
+    <tr><td>SHIP, PaCo</td><td>bootstrap</td><td>shallower or partial CoeffToSlot, smaller keys</td></tr></tbody></table>`,
+  explain:()=>`<p>Lesson 1 ran one neuron through a textbook CKKS. Production libraries and recent papers change that textbook in targeted ways. None of them changes what CKKS computes. Each one changes how fast, how precisely or how safely it computes it.</p>
+<p>This lesson visits the variants in pipeline order. Representation tricks come first (RNS, rescaling, packing). Then the decryption-side security fix. Then the bootstrapping family, which is where most current research effort goes, because bootstrapping takes 50–75% of encrypted LLM inference time.</p>
+<p>Every number on the RNS, rescaling, packing, attack, flooding and ModRaise steps is computed by a real toy CKKS in your browser. Steps marked <i>plaintext simulation</i> show the arithmetic of a mechanism without encrypting it, and the timeline step quotes figures from the papers.</p>`},
+
+{ key:"RNS", who:"server", whoT:"server", at:1, budget:3, scale:"Q = q₀·q₁·q₂", err:()=>R.crtOk?0:"mismatch",
+  title:"RNS: one big number becomes three small ones",
+  cap:()=>`A ${LS.bits(R.QR[2])}-bit coefficient is stored as three residues that fit machine words. The server multiplies each residue separately, and the Chinese Remainder Theorem rebuilds the exact big result.`,
+  scene(){ const c=R.ct[0][0], pw0=R.prodPer; const col=i=>110+i*230;
+    let g=small(400,22,"one coefficient of c₀ (mod Q = q₀·q₁·q₂)",'text-anchor="middle"')+tile(250,32,300,46,LS.hex(c,R.QR[2],8),"c-client","big",14);
+    R.QP.forEach((p,i)=>{ const x=col(i);
+      g+=`<g class="c-muted"><path d="M400,80 C400,104 ${x+80},100 ${x+80},128" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#ahm)"/></g>`;
+      g+=small(x+80,146,`mod q${LS.sub(i)} = ${p} (${LS.bits(p)} bits)`,'text-anchor="middle"');
+      g+=`<g class="rs">${tile(x,154,160,42,String(R.res0[i]),"c-client","",14)}</g>`;
+      g+=arrow(x+80,198,x+80,226,"ahs","c-server")+small(x+90,216,"× w (mod q"+LS.sub(i)+")");
+      g+=`<g class="pp">${tile(x,230,160,42,String(pw0[i][0][0]),"c-server","",14)}</g>`;
+      g+=`<g class="c-muted"><path d="M${x+80},274 C${x+80},300 400,296 400,318" fill="none" stroke="currentColor" stroke-width="2" ${i===1?'marker-end="url(#ahm)"':""}/></g>`; });
+    g+=`<g class="cr">${tile(250,322,300,46,LS.hex(R.recomb[0][0],R.QR[2],8),"c-server","",14)}</g>`;
+    g+=small(560,350,"CRT rebuild")+`<g class="${R.crtOk?"c-ok":"c-warn"} cr"><text x="400" y="392" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">${R.crtOk?"✓ identical to multiplying the big numbers directly":"✗ mismatch"}</text></g>`;
+    return svg(404,g,"A large coefficient splits into three residues, each multiplied by the weight modulo its own prime, then recombined by the Chinese Remainder Theorem into the same big product."); },
+  play(){ pop(".big",0); draw("path",300,600); pop(".rs",500,150); pop(".pp",1100,150); pop(".cr",1800,100); },
+  math:()=>`<div class="formula">q₀ = ${R.QP[0]},  q₁ = ${R.QP[1]},  q₂ = ${R.QP[2]}   (all ≡ 1 mod 2N = 8)</div>
+    <div class="formula">Q = ${R.QR[2]}  (${LS.bits(R.QR[2])} bits)</div>
+    <table class="nums"><thead><tr><th>prime</th><th>c₀[0] mod qᵢ</th><th>(c₀·w)[0] mod qᵢ</th></tr></thead><tbody>${R.QP.map((p,i)=>`<tr><td class="v">${p}</td><td class="v">${R.res0[i]}</td><td class="v">${R.prodPer[i][0][0]}</td></tr>`).join("")}</tbody></table>
+    <div class="formula">CRT(residues) = ${R.recomb[0][0]}  vs direct product = ${R.prodBig[0][0]}</div>`,
+  explain:()=>`<p>A real CKKS modulus has about 1,500 bits. Multiplying such numbers needs slow multi-precision arithmetic. The Residue Number System (Cheon, Han, Kim, Kim, Song, SAC 2018) picks the modulus as a product of primes that each fit in a 64-bit word, here three small primes.</p>
+<p>Each coefficient is then stored as its remainders modulo each prime. Addition and multiplication work independently on each remainder, so one big operation becomes several small, fully parallel ones. This is what makes GPUs and ASICs effective for CKKS: every prime is an independent lane.</p>
+<p>The Chinese Remainder Theorem guarantees that the residues determine the big number uniquely, so nothing is lost. In practice, libraries almost never rebuild the big number. Even rescaling and key switching are done directly on residues. The check at the bottom recombines once, only to show that the results match.</p>`},
+
+{ key:"Rescale", who:"server", whoT:"server", at:1, budget:2, scale:()=>`Δ²/q₂ ≈ ${R.scaleExact.toFixed(1)}`, err:()=>Math.abs(R.vEx[0]-R.n.prod[0]),
+  title:"Rescaling by a prime: track the real scale",
+  cap:()=>`With RNS, rescaling divides by the prime q₂ = ${R.q2}, not by exactly Δ = 2²⁰. Pretending they are equal causes a visible error. Tracking the true scale removes it.`,
+  scene(){ const pl=LS.plot(200,740,250,330,-8,-1,0,1); const lg=v=>Math.max(-8,Math.log10(Math.max(v,1e-8)));
+    const eN=Math.abs(R.vNom[0]-R.n.prod[0]), eE=Math.abs(R.vEx[0]-R.n.prod[0]);
+    let g=lbl(40,40,"Divide by Δ = 2²⁰ (ideal)","font-weight=\"700\"")+`<g class="c-client"><rect class="bar" x="300" y="26" width="380" height="20" rx="3" fill="currentColor" fill-opacity=".5"/></g>`+small(690,41,"1,048,576");
+    g+=lbl(40,78,"Divide by the prime q₂","font-weight=\"700\"")+`<g class="c-server"><rect class="bar" x="300" y="64" width="${Number(R.q2)/2**20*380}" height="20" rx="3" fill="currentColor" fill-opacity=".5"/></g>`+small(690,79,Number(R.q2).toLocaleString("en-US"));
+    g+=small(300,108,`the two differ by ${(2**20-Number(R.q2))} (${((2**20-Number(R.q2))/2**20*100).toFixed(4)}%)`);
+    g+=tile(40,130,330,50,`assume scale Δ:  ${f(R.vNom[0],6)}`,"c-warn","ve",14)+tile(430,130,330,50,`track Δ²/q₂:  ${f(R.vEx[0],6)}`,"c-ok","ve",14);
+    g+=small(205,198,"slot 1 should be "+f(R.n.prod[0],6),'text-anchor="middle"')+small(595,198,"slot 1 should be "+f(R.n.prod[0],6),'text-anchor="middle"');
+    g+=lbl(40,236,"Error in slot 1 (log scale)","font-weight=\"700\"");
+    [-8,-6,-4,-2].forEach(e=>{ g+=`<line x1="${pl.sx(e)}" y1="250" x2="${pl.sx(e)}" y2="330" stroke="currentColor" opacity=".15"/>`+small(pl.sx(e),346,"10"+sup(e),'text-anchor="middle"'); });
+    g+=small(40,274,"nominal Δ")+`<g class="c-warn"><rect class="eb" x="200" y="260" width="${pl.sx(lg(eN))-200}" height="22" rx="3" fill="currentColor"/><text x="${pl.sx(lg(eN))+8}" y="276" font-size="12" fill="currentColor">${fe(eN)}</text></g>`;
+    g+=small(40,312,"exact scale")+`<g class="c-ok"><rect class="eb" x="200" y="298" width="${Math.max(2,pl.sx(lg(eE))-200)}" height="22" rx="3" fill="currentColor"/><text x="${pl.sx(lg(eE))+8}" y="314" font-size="12" fill="currentColor">${fe(eE)}</text></g>`;
+    return svg(360,g,"Comparing division by delta and by the actual prime, the decoded value with an assumed scale has a larger error than with the tracked exact scale."); },
+  play(){ growX(".bar",0,250); pop(".ve",700,250); growX(".eb",1400,300); },
+  math:()=>`<div class="formula">after × w the scale is Δ² = 2⁴⁰;  rescale divides by q₂ = ${R.q2}</div><div class="formula">true new scale Δ' = 2⁴⁰ / q₂ = ${R.scaleExact.toFixed(4)}  (not 1,048,576)</div>
+    <table class="nums"><thead><tr><th>decode with</th><th>slot 1</th><th>slot 2</th><th>error</th></tr></thead><tbody>
+    <tr><td>Δ = 2²⁰</td><td class="v">${f(R.vNom[0],7)}</td><td class="v">${f(R.vNom[1],7)}</td><td class="v c-warn">${fe(Math.abs(R.vNom[0]-R.n.prod[0]))}</td></tr>
+    <tr><td>Δ' = Δ²/q₂</td><td class="v">${f(R.vEx[0],7)}</td><td class="v">${f(R.vEx[1],7)}</td><td class="v c-ok">${fe(Math.abs(R.vEx[0]-R.n.prod[0]))}</td></tr></tbody></table>`,
+  explain:()=>`<p>In Lesson 1 the moduli were powers of two, so dividing by Δ = 2²⁰ was exact. RNS needs primes, and a prime can only be close to 2²⁰. After rescaling by q₂, the true scale is Δ²/q₂, slightly larger than Δ.</p>
+<p>If the decoder keeps assuming Δ, every value is off by the factor Δ/q₂. Here that gives an error about a hundred times larger than the encryption noise. Worse, the drift compounds through many layers, and ciphertexts that went through different paths end up at slightly different scales that cannot be added correctly.</p>
+<p><b>Reduced-error CKKS</b> (Kim, Papadimitriou, Polyakov, CT-RSA 2022) tracks the exact scale of every ciphertext and adjusts constants so that scales match before additions. It also rescales right before each multiplication instead of after it. This is the FLEXIBLEAUTO mode that OpenFHE uses by default.</p>`},
+
+{ key:"Packing", who:"server", whoT:"server", at:1, budget:1, scale:"Δ", err:()=>Math.abs(R.cz[0][0]-R.n.z),
+  title:"Complex packing: a dot product without rotation",
+  cap:()=>`Put x₁ + x₂·i in one complex slot and multiply by w₁ − w₂·i. The real part of the product is exactly w₁x₁ + w₂x₂. Adding the conjugate removes the imaginary part, and no rotation is needed.`,
+  scene(){ const pl=LS.plot(500,770,330,40,-0.4,1.2,-1.8,1.8); const p=(a,b)=>[pl.sx(a),pl.sy(b)];
+    let g=small(40,34,"ONE COMPLEX SLOT")+tile(40,44,180,48,"1.5 + 2.0i".replace("1.5",String(R.x[0])).replace("2.0",String(R.x[1])),"c-client","t1",14)+`<text x="236" y="76" font-size="22" fill="currentColor">×</text>`+tile(262,44,180,48,"0.5 + 0.25i","c-server","t1",14);
+    g+=small(262,110,"w₁ − w₂·i  with w₂ = −0.25");
+    g+=arrow(240,120,240,150,"ahs","c-server")+tile(110,154,260,48,cplx(R.cm[0]),"c-server","t2",14)+small(380,184,"after × and rescale");
+    g+=arrow(240,204,240,232,"ahs","c-server")+small(250,224,"+ conjugate, × 0.5");
+    g+=tile(110,236,260,48,cplx([R.csum[0][0]/2,R.csum[0][1]/2]),"c-server","t3",14);
+    g+=arrow(240,286,240,312,"ahs","c-server")+small(250,304,"+ b");
+    g+=tile(110,316,260,48,"z = "+f(R.cz[0][0]),"c-ok","t4",14);
+    g+=`<line x1="${pl.sx(-0.4)}" y1="${pl.sy(0)}" x2="${pl.sx(1.2)}" y2="${pl.sy(0)}" stroke="currentColor" opacity=".4"/><line x1="${pl.sx(0)}" y1="${pl.sy(1.8)}" x2="${pl.sx(0)}" y2="${pl.sy(-1.8)}" stroke="currentColor" opacity=".4"/>`;
+    g+=small(pl.sx(1.2),pl.sy(0)-6,"real",'text-anchor="end"')+small(pl.sx(0)+6,pl.sy(1.8)+12,"imaginary");
+    const [ax,ay]=p(R.cm[0][0],R.cm[0][1]), [bx,by]=p(R.cconj[0][0],R.cconj[0][1]), [mx,my]=p(R.csum[0][0]/2,0);
+    g+=`<g class="c-server cp"><line x1="${pl.sx(0)}" y1="${pl.sy(0)}" x2="${ax}" y2="${ay}" stroke="currentColor" stroke-width="2"/><circle cx="${ax}" cy="${ay}" r="6" fill="currentColor"/><text x="${ax+10}" y="${ay+4}" font-size="12" fill="currentColor">product</text></g>`;
+    g+=`<g class="c-muted cp"><line x1="${pl.sx(0)}" y1="${pl.sy(0)}" x2="${bx}" y2="${by}" stroke="currentColor" stroke-width="2" stroke-dasharray="4 4"/><circle cx="${bx}" cy="${by}" r="6" fill="currentColor"/><text x="${bx+10}" y="${by+4}" font-size="12" fill="currentColor">conjugate</text></g>`;
+    g+=`<g class="c-ok cp"><circle cx="${mx}" cy="${my}" r="7" fill="currentColor"/><text x="${mx+10}" y="${my-10}" font-size="12" font-weight="700" fill="currentColor">average = ${f(R.csum[0][0]/2,3)}</text></g>`;
+    return svg(380,g,"Packing the input as one complex number and multiplying by a complex weight puts the dot product in the real part; averaging with the conjugate keeps only that real part."); },
+  play(){ pop(".t1",0,150); pop(".t2",500); pop(".t3",1000); pop(".t4",1500); pop(".cp",700,250); },
+  math:()=>`<div class="formula">(x₁ + x₂ i)(w₁ − w₂ i) = (w₁x₁ + w₂x₂) + (w₁x₂ − w₂x₁) i</div>
+    <table class="nums"><thead><tr><th>ciphertext</th><th>slot 1 (decrypted)</th></tr></thead><tbody>
+    <tr><td>after × and rescale</td><td class="v">${cplx(R.cm[0])}</td></tr><tr><td>conjugate (X → X⁷ + key switch)</td><td class="v">${cplx(R.cconj[0])}</td></tr>
+    <tr><td>sum × 0.5</td><td class="v">${cplx([R.csum[0][0]/2,R.csum[0][1]/2])}</td></tr><tr><td>+ b</td><td class="v">${cplx(R.cz[0])}</td></tr></tbody></table>`,
+  explain:()=>`<p>A CKKS slot holds a complex number, but Lesson 1 only used its real part, which wastes half the capacity. Frameworks such as STIP in the SoK pack two reals per slot as x₁ + x₂·i.</p>
+<p>Multiplication of complex numbers mixes the two parts in a useful way. Multiplying by w₁ − w₂·i puts the whole dot product w₁x₁ + w₂x₂ into the real part. The conjugation automorphism X → X⁷, with its own key-switching key, flips the sign of the imaginary part, so averaging a ciphertext with its conjugate keeps only the real part. The rotation of Lesson 1 is gone.</p>
+<p><b>Conjugate-invariant CKKS</b> (Kim and Song, ICISC 2018) takes the opposite route. It works in the subring of polynomials that conjugation leaves unchanged, and those encode only real values. That gives N real slots instead of N/2 complex ones, at the price of a more expensive bootstrapping. It is rarely used in practice, but the idea of packing reals more densely is the same.</p>`},
+
+{ key:"IND-CPA-D", who:"server", whoT:"attacker", at:1, budget:4, scale:"Δ", err:()=>R.sOk?"key stolen":"—",
+  title:"Sharing a decrypted result leaks the key",
+  cap:()=>R.sOk?"The client shares its decrypted numbers with the server. The server re-encodes them, subtracts c₀ and divides by c₁. That gives the secret key exactly.":"The attack needs an invertible c₁; try new keys.",
+  scene(){ const tiles=(arr,y,cls,ex)=>arr.map((v,i)=>`<g class="${ex}">${tile(470+i*76,y,68,44,big(LS.cmod(v,R.atk?C.q[0]:1n)),cls,"",14)}</g>`).join("");
+    let g=box(30,30,190,64,"ciphertext (c₀, c₁)","c-server","public, the server has it")+box(30,150,190,64,"shared result d","c-client","client decrypted and sent it");
+    g+=arrow(222,62,282,110,"ahs","c-server")+arrow(222,182,282,130,"ahc","c-client");
+    g+=box(286,90,150,60,"(encode(d) − c₀)","c-server","× c₁⁻¹ mod q");
+    g+=arrow(438,120,462,120,"ahs","c-server");
+    g+=small(470,80,"RECOVERED KEY")+tiles(R.sRec,92,R.sOk?"c-warn":"c-muted","rk");
+    g+=small(470,170,"TRUE SECRET KEY s")+tiles(C.K.s,182,"c-client","tk");
+    g+=`<g class="${R.sOk?"c-warn":"c-muted"} res"><text x="622" y="262" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">${R.sOk?"identical: the key is stolen":"not invertible this time"}</text></g>`;
+    g+=small(30,262,"Works because decryption is exact")+small(30,280,"up to the noise, and the noise is")+small(30,298,"fully revealed by the shared numbers.");
+    return svg(320,g,"The server combines the public ciphertext and the shared decrypted result, and recovers polynomial coefficients identical to the secret key."); },
+  play(){ pop(".bx",0,200); pop(".rk",900,120); pop(".tk",1500,120); blink(".res",2100); },
+  math:()=>`<div class="formula">c₀ + c₁·s = encode(d)   (exactly, because d carries the noise too)</div><div class="formula">s = (encode(d) − c₀) · c₁⁻¹   in Z_q[X]/(X⁴+1),  q = 2³⁰</div>
+    <table class="nums"><tbody><tr><td>shared slots d</td><td class="v">${R.shared.map(cplx).join(" ;  ")}</td></tr><tr><td>encode(d)</td><td class="v">${R.reenc.map(big).join(", ")}</td></tr>
+    <tr><td>recovered s</td><td class="v">${R.sRec.map(v=>big(LS.cmod(v,C.q[0]))).join(", ")}</td></tr><tr><td>true s</td><td class="v">${C.K.s.map(big).join(", ")}</td></tr>
+    <tr><td>tries to find invertible c₁</td><td class="v">${R.tries}</td></tr></tbody></table>`,
+  explain:()=>`<p>IND-CPA security says ciphertexts reveal nothing. It assumes the attacker never sees decryptions. Li and Micciancio (EUROCRYPT 2021) observed that in CKKS a decryption is not the clean message but the message plus the noise, and the noise depends on the secret key.</p>
+<p>If the client passes its decrypted numbers back to the server, the server knows c₀, c₁ and c₀ + c₁·s. In this toy, one polynomial division then yields s. Real attacks with large N need a little linear algebra but are just as effective. Exact schemes such as BFV do not have this problem, because decryption rounds the noise away.</p>
+<p>The SoK's threat model avoids the issue by assuming the client never shares decrypted outputs. That is a real restriction for multi-turn chat, where model outputs are often sent back as the next prompt.</p>`},
+
+{ key:"Flooding", who:"client", whoT:"client", at:0, budget:4, scale:"Δ", err:()=>Math.abs(R.sharedF[0][0]-R.shared[0][0]),
+  title:"Noise flooding: add noise before sharing",
+  cap:()=>"Before sharing, the client adds fresh random noise to the decryption. The attacker's equation now hides the key under that noise, at the cost of a few bits of precision.",
+  scene(){ const tiles=(arr,y,cls,ex)=>arr.map((v,i)=>`<g class="${ex}">${tile(470+i*76,y,68,44,big(LS.cmod(v,C.q[0])),cls,"",12)}</g>`).join("");
+    let g=box(30,30,190,64,"ciphertext (c₀, c₁)","c-server","public")+box(30,150,190,64,"d + flood","c-client","flood ∈ [−4096, 4096]");
+    g+=arrow(222,62,282,110,"ahs","c-server")+arrow(222,182,282,130,"ahc","c-client");
+    g+=box(286,90,150,60,"same attack","c-server","(encode(d') − c₀)·c₁⁻¹");
+    g+=arrow(438,120,462,120,"ahs","c-server");
+    g+=small(470,80,"RECOVERED \"KEY\"")+tiles(R.sRecF,92,"c-ok","rk");
+    g+=small(470,170,"TRUE SECRET KEY s")+tiles(C.K.s,182,"c-client","tk");
+    g+=`<g class="c-ok res"><text x="622" y="262" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">garbage: the key stays hidden</text></g>`;
+    g+=small(30,262,"Price: the shared value moves by")+`<g class="c-noise"><text x="30" y="282" font-size="13" font-weight="700" fill="currentColor">${fe(Math.abs(R.sharedF[0][0]-R.shared[0][0]))} instead of ~10⁻⁶</text></g>`;
+    return svg(320,g,"With flooding noise added to the shared result, the same attack produces large meaningless numbers instead of the secret key."); },
+  play(){ pop(".bx",0,200); pop(".rk",900,120); pop(".tk",1500,120); blink(".res",2100); },
+  math:()=>`<div class="formula">d' = decode(c₀ + c₁·s + e_flood),   e_flood uniform in [−2¹², 2¹²]</div><div class="formula">attacker gets (encode(d') − c₀)·c₁⁻¹ = s + e_flood·c₁⁻¹</div>
+    <table class="nums"><tbody><tr><td>flood noise</td><td class="v">${R.flood.map(big).join(", ")}</td></tr><tr><td>recovered</td><td class="v">${R.sRecF.map(v=>big(LS.cmod(v,C.q[0]))).join(", ")}</td></tr>
+    <tr><td>shared slot 1 before / after</td><td class="v">${f(R.shared[0][0],7)} / ${f(R.sharedF[0][0],7)}</td></tr></tbody></table>`,
+  explain:()=>`<p>The fix (Li, Micciancio, Schultz, Sorrell, CRYPTO 2022) treats the shared value like a differentially private release. The decryptor adds noise drawn from a wide distribution before revealing anything. The attacker's equation now has an unknown, large term e_flood·c₁⁻¹, and the key is no longer determined.</p>
+<p>The noise must be much larger than the CKKS noise it hides, so the shared result loses precision, here from about 10⁻⁶ to about 10⁻³. Real systems compensate with a larger scale Δ or with high-precision bootstrapping, such as the discrete-CKKS method of Choe, Kim, Stehlé and Suvanto (2025), which reaches the 80+ bits flooding needs.</p>
+<p>OpenFHE exposes this as a decryption mode (NOISE_FLOODING_DECRYPT). It matters most for threshold CKKS (Lesson 11), where parties must publish partial decryptions.</p>`},
+
+{ key:"ModRaise", who:"server", whoT:"server", at:1, budget:0, scale:"q₀ → Q_L", err:()=>R.relSin, sim:false,
+  title:"Bootstrapping starts with a giant wrap-around",
+  cap:()=>`At level 0 the server reinterprets the ciphertext modulo a much larger modulus. Decryption then gives Δm + q₀·I, with small integers I between −${R.maxD} and ${R.maxD}. EvalMod must remove the q₀·I part.`,
+  scene(){ const pl=LS.plot(430,780,320,160,-3.2,3.2,-1.4,1.4);
+    const saw=t=>{ const r=t-Math.round(t); return r*2.2; }, sine=t=>Math.sin(2*Math.PI*t)/(2*Math.PI)*2.2;
+    let g=box(20,30,120,56,"level-0 ct","c-server","no levels left")+arrow(142,58,166,58,"ahs","c-server")+box(170,30,120,56,"ModRaise","c-server","read mod Q_L")+arrow(292,58,316,58,"ahs","c-server");
+    g+=box(320,30,120,56,"CoeffToSlot","c-server","move to slots")+arrow(442,58,466,58,"ahs","c-server")+box(470,30,120,56,"EvalMod","c-noise","x mod q₀ ≈ sine")+arrow(592,58,616,58,"ahs","c-server")+box(620,30,150,56,"SlotToCoeff","c-server","fresh ct, levels back");
+    g+=small(20,118,`After ModRaise, each decrypted coefficient (${NB}-coefficient toy ring) is Δm + q₀·I:`);
+    const Is=R.Idense.slice(0,16);
+    Is.forEach((v,i)=>{ g+=`<g class="${v===0?"c-muted":"c-noise"} iv">${tile(20+i*24,128,22,30,String(v).replace("-","−"),v===0?"c-muted":"c-noise","",11)}</g>`; });
+    g+=small(20,178,"I for the first 16 coefficients (dense key, Hamming weight "+R.hwD+")");
+    g+=`<g clip-path="url(#pcm)"><clipPath id="pcm"><rect x="430" y="152" width="360" height="176"/></clipPath>`;
+    g+=`<g class="c-client"><path class="cv" pathLength="1" stroke-dasharray="1" d="${pl.path(saw,400)}" fill="none" stroke="currentColor" stroke-width="2.5"/></g>`;
+    g+=`<g class="c-noise"><path class="cv" pathLength="1" stroke-dasharray="1" d="${pl.path(sine,200)}" fill="none" stroke="currentColor" stroke-width="2.5"/></g></g>`;
+    g+=`<line x1="430" y1="${pl.sy(0)}" x2="780" y2="${pl.sy(0)}" stroke="currentColor" opacity=".3"/>`;
+    [-3,-2,-1,0,1,2,3].forEach(k=>{ g+=small(pl.sx(k),336,k?(k>0?"+":"−")+Math.abs(k)+"q₀":"0",'text-anchor="middle"'); });
+    g+=`<g class="c-client"><rect x="440" y="134" width="14" height="4" fill="currentColor"/><text x="460" y="140" font-size="12" fill="currentColor">t mod q₀ (what we want)</text></g><g class="c-noise"><rect x="610" y="134" width="14" height="4" fill="currentColor"/><text x="630" y="140" font-size="12" fill="currentColor">(q₀/2π)·sin(2πt/q₀)</text></g>`;
+    g+=small(20,220,"EvalMod must turn every Δm + q₀·I back into Δm.")+small(20,240,"A sine matches t mod q₀ near each multiple of q₀,")+small(20,260,"and Δm is tiny next to q₀ = 2³⁰.");
+    g+=`<g class="c-noise"><text x="20" y="292" font-size="13" font-weight="700" fill="currentColor">sine error on our coefficients: ${fe(R.relSin)} of a slot</text></g>`;
+    return svg(350,g,"Bootstrapping pipeline boxes, the small integers I produced by ModRaise, and a chart where a sine curve approximates the sawtooth function t mod q0 near multiples of q0."); },
+  play(){ pop(".bx",0,120); pop(".iv",700,30); draw(".cv",1300,1200); },
+  math:()=>`<div class="formula">c₀ + c₁·s (over the integers) = Δm + e + q₀·I</div>
+    <table class="nums"><tbody><tr><td>I (all ${NB} coefficients, dense key)</td><td class="v" style="white-space:normal">${R.Idense.join(" ")}</td></tr>
+    <tr><td>max |I|</td><td class="v">${R.maxD}</td></tr><tr><td>max |sine − exact| on our coefficients</td><td class="v">${R.maxSinErr.toFixed(4)} (in units of Δ: ${fe(R.relSin)})</td></tr></tbody></table>
+    <p>The sine error is a plaintext computation on the real decrypted coefficients. In real bootstrapping the sine itself is approximated by a polynomial (Chebyshev or Taylor plus double-angle steps), which adds more error and costs about 8–12 levels.</p>`,
+  explain:()=>`<p>A ciphertext at level 0 cannot be multiplied any more. Bootstrapping (Cheon, Han, Kim, Kim, Song, EUROCRYPT 2018) restores levels by evaluating the decryption formula homomorphically.</p>
+<p>It has four stages. <b>ModRaise</b> treats the level-0 ciphertext as if it lived modulo the top modulus. This costs nothing, but decryption now gives Δm + q₀·I, where I is a small integer per coefficient. <b>CoeffToSlot</b> is a big linear transform that moves coefficients into slots so they can be processed in parallel. <b>EvalMod</b> computes x mod q₀ to strip the q₀·I part. <b>SlotToCoeff</b> moves the results back.</p>
+<p>EvalMod is the hard part, because "mod" is not a polynomial. The trick is that Δm is tiny next to q₀, so near each multiple of q₀ the function t mod q₀ looks like a scaled sine. The wider the range of I, the more periods the sine approximation must cover and the higher its degree. That is why the size of I matters, which leads to the next step.</p>`},
+
+{ key:"Sparse key", who:"server", whoT:"server", at:1, budget:0, scale:"q₀", err:()=>Math.abs(R.sparseDec-R.x[0]),
+  title:"Sparse-secret encapsulation shrinks I",
+  cap:()=>`I grows with the number of non-zero key coefficients. Switching to a sparse key with ${R.hwS} non-zero coefficients only inside bootstrapping cut max |I| from ${R.maxD} to ${R.maxS}, with no security loss for the main key.`,
+  scene(){ const hist=(arr,x0,cls,lbl0)=>{ const cnt={}; arr.forEach(v=>cnt[v]=(cnt[v]||0)+1); const ks=[]; for(let k=-8;k<=8;k++) ks.push(k); let g=small(x0,40,lbl0,'font-weight="700"');
+      const mx=Math.max(...Object.values(cnt)); ks.forEach((k,i)=>{ const h=(cnt[k]||0)/mx*150; g+=`<g class="${cls}"><rect class="hb" x="${x0+i*19}" y="${210-h}" width="15" height="${h}" fill="currentColor" fill-opacity=".6" style="transform-box:fill-box;transform-origin:bottom"/></g>`; if(k%4===0) g+=small(x0+i*19+7,228,String(k).replace("-","−"),'text-anchor="middle"'); });
+      return g+`<line x1="${x0}" y1="210" x2="${x0+ks.length*19}" y2="210" stroke="currentColor" opacity=".35"/>`; };
+    let g=hist(R.Idense,30,"c-noise",`dense key (weight ${R.hwD}): I ∈ [${Math.min(...R.Idense)}, ${Math.max(...R.Idense)}]`.replace(/-/g,"−"))+hist(R.Isparse,440,"c-ok",`sparse key (weight ${R.hwS}): I ∈ [${Math.min(...R.Isparse)}, ${Math.max(...R.Isparse)}]`.replace(/-/g,"−"));
+    g+=small(190,248,"value of I",'text-anchor="middle"')+small(600,248,"value of I",'text-anchor="middle"');
+    g+=box(250,272,300,56,"key switch dense → sparse","c-server","right before ModRaise, back after");
+    g+=arrow(214,258,246,284,"ahm")+arrow(554,284,586,258,"ahm");
+    g+=`<g class="c-ok"><text x="400" y="352" text-anchor="middle" font-size="12.5" fill="currentColor">after switching, the message still decrypts to ${f(R.sparseDec,5)} (x₁ = ${R.x[0]})</text></g>`;
+    return svg(364,g,"Two histograms of the integer I: wide for the dense key and narrow for the sparse key, with a key-switch box between them."); },
+  play(){ LS.A(".hb",[{transform:"scaleY(0)"},{transform:"scaleY(1)"}],{s:25,d:600}); pop(".bx",900); },
+  math:()=>`<div class="formula">I ≈ (c₁·s)/q₀ rounded, so |I| ≲ (‖s‖₁ + 1)/2</div>
+    <table class="nums"><thead><tr><th>key</th><th>non-zero coefficients</th><th>max |I| (this ciphertext)</th></tr></thead><tbody>
+    <tr><td>dense</td><td class="v">${R.hwD} of ${NB}</td><td class="v">${R.maxD}</td></tr><tr><td>sparse</td><td class="v">${R.hwS} of ${NB}</td><td class="v">${R.maxS}</td></tr></tbody></table>`,
+  explain:()=>`<p>The integer I is roughly c₁·s/q₀ rounded. Each non-zero key coefficient adds a random term, so the range of I grows with the key's Hamming weight. Early CKKS used very sparse keys everywhere to keep I small. That weakens security, because sparse secrets are easier to guess.</p>
+<p><b>Sparse-secret encapsulation</b> (Bossuat, Troncoso-Pastoriza, Hubaux, ACNS 2022) keeps a dense main key. Just before bootstrapping it key-switches the ciphertext to a sparse key, at a small modulus where the sparse key is still secure, bootstraps, and switches back. The histogram shows the effect on a real 128-coefficient toy ciphertext.</p>
+<p>A smaller I means EvalMod covers fewer sine periods, which lowers its degree and saves levels. Lattigo implements this technique.</p>`},
+
+{ key:"Faster BTS", who:"server", whoT:"research", at:1, budget:4, scale:"—", err:()=>"—", sim:true,
+  title:"Faster and more precise bootstrapping",
+  cap:()=>`Recent variants attack each bootstrapping cost: precision (META-BTS), wasted modulus (Grafting), depth (SHIP) and key size (PaCo). In this toy, a second META-BTS pass would raise precision from about ${R.p1.toFixed(0)} to ${R.p2.toFixed(0)} bits.`,
+  scene(){ const ev=[[2018,"First CKKS bootstrapping","EUROCRYPT 2018"],[2019,"Faster linear transforms","Chen–Chillotti–Song"],[2021,"Non-sparse keys, high precision","Bossuat et al.; Lee et al."],[2022,"META-BTS: bootstrap the error","CCS 2022"],[2024,"Grafting: scale ≠ prime size","ePrint 2024/1014"],[2025,"SHIP: shallow, parallel","EUROCRYPT 2025"],[2025,"PaCo: ≈0.25 GB keys","ePrint 2025/886"],[2026,"< 10 ms on GPU","ePrint 2026/2119"]];
+    let g=`<line x1="110" y1="24" x2="110" y2="${24+ev.length*34-14}" stroke="currentColor" stroke-width="2" opacity=".4"/>`;
+    ev.forEach(([y,t,src],i)=>{ const yy=30+i*34; g+=`<g class="ev"><text x="90" y="${yy+5}" text-anchor="end" font-size="12" class="mono c-muted" fill="currentColor">${y}</text><circle cx="110" cy="${yy}" r="6" fill="var(--server)"/>
+      <text x="130" y="${yy+5}" font-size="13.5" font-weight="700" fill="currentColor">${t}</text><text x="770" y="${yy+5}" text-anchor="end" font-size="12" fill="currentColor" class="c-muted">${src}</text></g>`; });
+    g+=`<g class="c-noise"><text x="400" y="320" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">toy precision model: one pass ≈ ${R.p1.toFixed(1)} bits → META-BTS ≈ ${R.p2.toFixed(1)} bits</text></g>`;
+    return svg(336,g,"Timeline of CKKS bootstrapping improvements from 2018 to 2026, with a computed precision gain for META-BTS."); },
+  play(){ LS.A(".ev",[{opacity:0,transform:"translateY(12px)"},{opacity:1,transform:"none"}],{s:150,d:500}); },
+  math:()=>`<p>The precision line is a plaintext model: one bootstrapping pass leaves the sine error measured on the previous step (${R.maxSinErr.toFixed(3)} units, ${R.p1.toFixed(1)} bits below Δ). META-BTS bootstraps that error again after scaling it up, roughly doubling the bits of precision (capped at double precision). The timeline facts are cited from the papers; the 0.25 GB key figure for PaCo and sub-10 ms GPU time are as reported (SoK §6, ePrint 2026/2119).</p>`,
+  explain:()=>`<p><b>META-BTS</b> (Bae, Cheon, Cho, Kim, Kim, CCS 2022) observes that bootstrapping error is itself a small number. Bootstrapping a scaled copy of the error and subtracting it doubles the precision for roughly twice the cost. Deep LLMs benefit, because error accumulates over dozens of layers.</p>
+<p><b>Grafting</b> (Cheon, Hanrot, Kim, Stehlé, 2024) cuts the link between the scale Δ and the size of the RNS primes. Libraries can then use primes that match the machine word, 32 or 64 bits, while choosing any scale. That saves modulus that would otherwise be wasted, and it is used by Zephyr for 32-bit GPU CKKS.</p>
+<p><b>SHIP</b> (EUROCRYPT 2025) restructures bootstrapping to be very shallow and parallel. The SoK notes its evaluation keys are larger than classic bootstrapping. <b>PaCo</b> (Coron and Seuré, 2025) does only a partial CoeffToSlot and needs about 0.25 GB of keys, which the SoK highlights as attractive because key memory is a main bottleneck for LLM inference.</p>`}
+];
+const cfg={ id:"ckks-variants", title:"CKKS Variants Step by Step", compute, setup,
+  inputNote:"Change x and the RNS, packing, attack and bootstrapping numbers are recomputed. New keys also redraw the sparse key.",
+  status:{budgetLabel:"Levels left", budgetCells:4, scaleLabel:"Modulus / scale"},
+  footer:'Real toy CKKS: N = 4 (Δ = 2²⁰, q up to 2⁹⁰) for RNS, rescaling, packing and the attack; N = 128 for the ModRaise statistics. RNS primes ≈ 2³⁰, 2²⁰, 2²⁰. Steps marked “plaintext simulation” compute without encryption. Papers: <a href="https://eprint.iacr.org/2018/931">RNS-CKKS</a>, <a href="https://eprint.iacr.org/2020/1118">reduced error</a>, <a href="https://eprint.iacr.org/2018/952">conjugate-invariant</a>, <a href="https://eprint.iacr.org/2020/1533">Li–Micciancio</a>, <a href="https://eprint.iacr.org/2022/816">noise flooding</a>, <a href="https://eprint.iacr.org/2022/024">sparse-secret</a>, <a href="https://eprint.iacr.org/2022/1167">META-BTS</a>, <a href="https://eprint.iacr.org/2024/1014">Grafting</a>, <a href="https://eprint.iacr.org/2025/784">SHIP</a>, <a href="https://eprint.iacr.org/2025/886">PaCo</a>.',
+  cardResult:()=>`z = ${f(R.cz[0][0])} without a rotation (complex packing)`,
+  steps };
+steps.push(LS.cardStep(cfg,{name:"CKKS variants",budget:4,
+  explain:()=>`<p>The variants do not change the comparison with other schemes much: CKKS stays approximate, packed and bootstrapping-bound. What they change is the constant factors. RNS and Grafting make arithmetic machine-friendly, reduced-error CKKS and META-BTS make results more precise, and sparse-secret, SHIP and PaCo make bootstrapping cheaper. Flooding makes it safe to share results.</p>`}));
+LS.start(cfg);
+})();
+</script>
+</body>
+</html>

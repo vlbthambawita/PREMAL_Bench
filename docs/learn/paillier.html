@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Paillier Step by Step</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lesson.css">
+</head>
+<body>
+<div id="app"></div>
+<script src="lessons.js"></script>
+<script src="cards/paillier.js"></script>
+<script src="lesson.js"></script>
+<script src="engines/phe.js"></script>
+<script>
+(function(){
+"use strict";
+const {svg,tile,lock,lbl,small,arrow,pop,fade,draw,slide,blink,growX,f,fe,sup,big}=LS;
+const hx=(v,m)=>LS.hex(v,m,6);
+let K, DJ, R;
+const SC=10n, WS=4n, BS=40n, S20=10n**20n;
+function compute(inp){
+  const x=[inp.x1,inp.x2], N=LS.neuron(x);
+  const xi=x.map(v=>BigInt(Math.round(v*10))), wi=[2n,-1n], bi=4n;
+  const e1=K.enc(xi[0]), e2=K.enc(xi[1]), e1b=K.enc(xi[0]);
+  const t1=K.mulConst(e1.c,wi[0]), t2=K.mulConst(e2.c,wi[1]), s=K.add(t1,t2), cz=K.addConst(s,bi);
+  const zi=K.decS(cz), zexact=xi[0]*wi[0]+xi[1]*wi[1]+bi;
+  /* one-round helper for ReLU */
+  let r; do{ r=BigInt(LS.randInt(1000,999999)); }while(PHE.gcd(r,K.n)!==1n);
+  const blind=K.mulConst(cz,r), rz=K.decS(blind), reluR=rz>0n?rz:0n, back=K.enc(reluR).c, crelu=K.mulConst(back,LS.invmod(r,K.n)), reluI=K.decS(crelu);
+  /* Damgård–Jurik with a 10^20 scale */
+  const xd=x.map(v=>BigInt(Math.round(v*10))*S20);
+  const d1=DJ.enc(xd[0]), d2=DJ.enc(xd[1]), dz=DJ.addConst(DJ.add(DJ.mulConst(d1,wi[0]),DJ.mulConst(d2,wi[1])),bi*S20), dzi=DJ.decS(dz);
+  R={...N,xi,wi,bi,e1,e2,e1b,t1,t2,s,cz,zi,zexact,r,blind,rz,reluR,back,crelu,reluI,xd,dz,dzi,
+     zval:Number(zi)/40, yval:Number(reluI)/40, dval:Number(dzi)/Number(40n*S20)};
+  return R;
+}
+const steps=[
+{ key:"Example", who:"both", whoT:"the task", at:0, budget:"0 extra rounds", scale:"integers", err:()=>0,
+  title:"The neuron in whole numbers",
+  cap:()=>`Paillier works on integers mod n. Scale x by 10, w by 4 and b by 40: then 40·z = ${R.xi[0]}·2 + ${R.xi[1]}·(−1) + 4 = <b>${R.zexact}</b>, so z = ${f(Number(R.zexact)/40,2)} exactly.`,
+  scene(){ return svg(260,`
+      ${small(40,34,"CLIENT INPUT ×10")}<g class="pa">${tile(40,46,96,50,big(R.xi[0]),"c-client")}</g><g class="pa">${tile(146,46,96,50,big(R.xi[1]),"c-client")}</g>
+      ${small(290,34,"SERVER WEIGHTS ×4")}<g class="pb">${tile(290,46,96,50,"2","c-server")}</g><g class="pb">${tile(396,46,96,50,"−1","c-server")}</g>
+      ${small(540,34,"BIAS ×40")}<g class="pb">${tile(540,46,96,50,"4","c-server")}</g>
+      ${arrow(300,130,300,160,"ahm")}
+      <g class="c-ok res">${tile(220,168,170,54,"40z = "+big(R.zexact),"c-ok","",16)}</g>
+      <g class="c-ok res">${lbl(410,201,"÷ 40  →  z = "+f(Number(R.zexact)/40,4)+",  ReLU(z) = "+f(Math.max(0,Number(R.zexact))/40,4))}</g>
+      ${small(40,250,"Weights must be integers too, so 0.5 → 2 and −0.25 → −1 after scaling by 4; 10 × 4 = 40 is the final divisor.")}`,
+      "Integer versions of the inputs, weights and bias combine to forty times z equals fourteen."); },
+  play(){ pop(".pa",0,120); pop(".pb",300,120); pop(".res",800,200); },
+  math:()=>`<div class="formula">40·z = (10x₁)(4w₁) + (10x₂)(4w₂) + 40b = ${R.xi[0]}·2 + ${R.xi[1]}·(−1) + 4 = ${R.zexact}</div><p>Because Paillier is exact, the only rounding happens here, when the client scales its real inputs to integers (x×10).</p>`,
+  explain:()=>`<p>Paillier is the oldest scheme in this series that is still widely used, mostly for secure aggregation and voting. It encrypts integers modulo a large number n and is exact: there is no noise and no approximation.</p><p>That means the neuron must be written in whole numbers. We use the same encoding as the BFV lesson. Multiply x by 10, w by 4 and b by 40, so the weighted sum comes out as 40·z. With the shared inputs, 40·z = 14, which gives z = 0.35 with no error at all.</p><p>The catch is that Paillier offers only two operations on ciphertexts: adding two encrypted numbers, and multiplying an encrypted number by a public constant. The linear part of the neuron fits. ReLU does not.</p>` },
+{ key:"Keys", who:"client", whoT:"client", at:0, budget:"0 extra rounds", scale:"integers", err:()=>0,
+  title:"Keys from two primes",
+  cap:()=>`The client picks two random ${K.p.toString(2).length}-bit primes. Their product n is public. The secret is λ, which needs the factors.`,
+  scene(){ return svg(260,`
+      ${small(40,34,"SECRET PRIMES")}<g class="kp">${tile(40,46,200,48,K.p.toString(),"c-client","",13)}</g><g class="kp">${tile(40,104,200,48,K.q.toString(),"c-client","",13)}</g>
+      ${lock(250,60)}
+      ${arrow(260,100,330,100,"ahm")}${small(295,90,"multiply",'text-anchor="middle"')}
+      ${small(340,34,"PUBLIC KEY")}<g class="kn">${tile(340,46,260,48,"n = "+K.n.toString(),"c-server","",13)}</g><g class="kn">${tile(340,104,260,48,"g = n + 1","c-server","",13)}</g>
+      ${small(340,180,"SECRET KEY")}<g class="kl">${tile(340,190,260,40,"λ = lcm(p−1, q−1)","c-client","",13)}</g>
+      ${small(40,190,"n has "+K.n.toString(2).length+" bits here; real keys use 3072-bit n.")}`,
+      "Two secret primes multiply to the public modulus n; the secret key lambda is derived from the primes."); },
+  play(){ pop(".kp",0,150); fade(".c-muted line",400); slide(".kn",-40,0,600,150); pop(".kl",1100); },
+  math:()=>`<div class="formula">p = ${K.p},  q = ${K.q}</div><div class="formula">n = p·q = ${K.n},   n² = ${K.n2}</div><div class="formula">λ = lcm(p−1, q−1) = ${K.lam},   μ = L(g^λ mod n²)⁻¹ mod n = ${K.mu}</div>`,
+  explain:()=>`<p>Paillier's security rests on factoring and on the decisional composite residuosity assumption. Given n = p·q, it should be hard to tell n-th powers modulo n² from random numbers.</p><p>The client draws two random primes, here about ${K.p.toString(2).length} bits each, which is laughably small. Real deployments use n of 3072 bits. The client publishes n and g = n + 1. The secret λ = lcm(p − 1, q − 1) can only be computed by someone who knows the factors.</p><p>Unlike the lattice schemes, there are no evaluation keys at all. The public key alone lets the server add and scale. Shor's algorithm factors n efficiently, so Paillier is <b>not</b> post-quantum.</p>` },
+{ key:"Encrypt", who:"client", whoT:"client", at:0.5, budget:"0 extra rounds", scale:"integers", err:()=>0,
+  title:"Encrypt with fresh randomness",
+  cap:()=>`c = (1 + n)ᵐ · rⁿ mod n². The random r makes every encryption different: two encryptions of ${R.xi[0]} below look unrelated.`,
+  scene(){ return svg(270,`
+      ${small(40,34,"FORMULA")}${lbl(40,60,"c = (1 + m·n) · rⁿ  mod n²","class=\"mono\" font-weight=\"700\"")}
+      ${small(40,96,"Enc("+R.xi[0]+")")}<g class="ct">${tile(40,106,330,44,hx(R.e1.c,K.n2),"c-client","",13)}</g>
+      ${small(410,96,"Enc("+R.xi[1]+")")}<g class="ct">${tile(410,106,330,44,hx(R.e2.c,K.n2),"c-client","",13)}</g>
+      ${small(40,184,"Enc("+R.xi[0]+") again, new r")}<g class="ct2">${tile(40,194,330,44,hx(R.e1b.c,K.n2),"c-client","",13)}</g>
+      <g class="c-ok ct2">${lbl(410,222,"same plaintext, unrelated ciphertext")}</g>
+      ${lock(352,92)}${lock(722,92)}`,
+      "Two encryptions of the client inputs, and a second encryption of the first input that looks completely different because of fresh randomness."); },
+  play(){ pop(".ct",0,200); pop(".lock",500,100); slide(".ct2",0,-30,900); },
+  math:()=>`<div class="formula">Enc(${R.xi[0]}) = ${R.e1.c}</div><div class="formula">Enc(${R.xi[1]}) = ${R.e2.c}</div><p>(1+n)ᵐ = 1 + m·n mod n² by the binomial theorem, which is what makes decryption possible. The factor rⁿ is a random n-th power: indistinguishable from random without the factorization.</p>`,
+  explain:()=>`<p>To encrypt m, the client picks a random r and computes (1 + n)ᵐ · rⁿ mod n². The first factor carries the message. By the binomial theorem it equals 1 + m·n mod n², so the message sits in a simple linear form.</p><p>The second factor, a random n-th power, is the mask. Without knowing p and q nobody can tell it apart from a random number modulo n², and so nobody can strip it off.</p><p>Because r is fresh each time, encrypting the same number twice gives unrelated ciphertexts. Textbook RSA in the next lesson lacks exactly this property.</p>` },
+{ key:"w·x + b", who:"server", whoT:"server", at:1, budget:"0 extra rounds", scale:"40·z", err:()=>0,
+  title:"Linear part: multiply ciphertexts to add",
+  cap:()=>`Raising a ciphertext to k multiplies its plaintext by k. Multiplying two ciphertexts adds their plaintexts. That is enough for w·x + b.`,
+  scene(){ return svg(300,`
+      ${small(40,30,"CIPHERTEXT OPERATION  →  PLAINTEXT EFFECT")}
+      <g class="r1">${tile(40,44,180,44,"Enc("+R.xi[0]+")²","c-client","",14)}${lbl(236,72,"→  "+R.xi[0]+" · 2 = "+(R.xi[0]*2n))}</g>
+      <g class="r1">${tile(40,98,180,44,"Enc("+R.xi[1]+")⁻¹","c-client","",14)}${lbl(236,126,"→  "+R.xi[1]+" · (−1) = "+big(-R.xi[1]))}</g>
+      <g class="r2">${tile(40,152,180,44,"product of both","c-client","",14)}${lbl(236,180,"→  "+(R.xi[0]*2n)+" + ("+big(-R.xi[1])+") = "+big(R.xi[0]*2n-R.xi[1]))}</g>
+      <g class="r3">${tile(40,206,180,44,"× (1 + 4n)","c-server","",14)}${lbl(236,234,"→  + 4 = "+big(R.zexact))}</g>
+      ${arrow(436,150,560,150,"ahs","c-server")}
+      <g class="r3">${tile(570,124,180,52,"Enc(40z)","c-client","",15)}${lock(734,110)}</g>
+      ${small(570,200,"ciphertext mod n², "+K.n2.toString(2).length+" bits")}`,
+      "Exponentiating ciphertexts scales their plaintexts, multiplying ciphertexts adds plaintexts, and multiplying by one plus four n adds the bias, giving an encryption of forty z."); },
+  play(){ slide(".r1",-30,0,0,200); slide(".r2",-30,0,600); slide(".r3",-30,0,1000,200); },
+  math:()=>`<div class="formula">Enc(a)·Enc(b) = (1+n)^{a+b}·(r₁r₂)ⁿ = Enc(a + b)        Enc(a)ᵏ = Enc(k·a)</div><div class="formula">Enc(${R.xi[0]})² · Enc(${R.xi[1]})⁻¹ · (1 + 4n)  mod n² = ${R.cz}</div><p>A negative weight uses the modular inverse of the ciphertext mod n² (Enc(−a) = Enc(a)⁻¹). Adding a public constant k needs no randomness: multiply by (1 + k·n).</p>`,
+  explain:()=>`<p>The algebra is short. Multiply two ciphertexts and the (1 + n) parts multiply, which adds the exponents, so the plaintexts add. The random masks multiply into another random mask. Raising a ciphertext to a public power k multiplies the plaintext by k.</p><p>So the server computes Enc(15)² · Enc(20)⁻¹ · (1 + 4n), all modulo n². That yields an encryption of 2·15 − 20 + 4 = 14 without ever seeing the inputs. Negative weights use the modular inverse, and the bias is added by multiplying with (1 + 4n).</p><p>This is the whole toolbox. There is no way to multiply two encrypted numbers together, which rules out z², any polynomial, and any comparison.</p>` },
+{ key:"Decrypt z", who:"client", whoT:"client", at:0, budget:"0 extra rounds", scale:"40·z", err:()=>Math.abs(R.zval-R.z),
+  title:"Decrypt the linear part exactly",
+  cap:()=>`L(c^λ mod n²)·μ mod n = <b>${big(R.zi)}</b>, so z = ${big(R.zi)}/40 = <b>${f(R.zval)}</b> with zero error. Numbers above n/2 would read as negative.`,
+  scene(){ return svg(230,`
+      <g class="dz">${tile(40,40,330,46,hx(R.cz,K.n2),"c-client","",13)}</g>${small(40,30,"Enc(40z)")}
+      ${arrow(380,63,452,63,"ahc","c-client")}${small(416,52,"c^λ, L, × μ",'text-anchor="middle"')}
+      <g class="c-client dv">${tile(462,36,120,54,big(R.zi),"c-client","",20)}</g>
+      ${arrow(592,63,640,63,"ahk","c-ok")}<g class="c-ok dv"><text x="650" y="58" font-size="13" fill="currentColor">÷ 40</text><text x="650" y="80" font-size="22" font-family="var(--mono)" fill="currentColor">${f(R.zval)}</text></g>
+      ${small(40,140,"L(u) = (u − 1)/n.  Raising to λ kills the random mask rⁿ, leaving (1 + n)^(mλ) = 1 + mλ·n.")}
+      ${small(40,162,"Error: exactly 0. Paillier has no noise, unlike every lattice scheme in this series.")}`,
+      "The client decrypts the encrypted linear result to the integer fourteen, which divided by forty is exactly 0.35."); },
+  play(){ pop(".dz",0); pop(".dv",500,250); },
+  math:()=>`<div class="formula">c^λ mod n² = 1 + (40z·λ mod n)·n</div><div class="formula">40z = L(c^λ mod n²) · μ mod n = ${R.zi}  →  z = ${f(R.zval,6)}</div>`,
+  explain:()=>`<p>Decryption raises the ciphertext to λ. Every n-th power has order dividing λ·n, so the random mask rⁿ becomes 1. What remains is (1 + n)^{mλ} = 1 + mλ·n. Subtract 1, divide by n, and multiply by μ = λ⁻¹ to read off m.</p><p>The answer is exactly 14. Dividing by the encoding factor 40 gives z = 0.35 with no error at all, compared with the 10⁻⁶ noise of CKKS. Exactness is Paillier's strength.</p><p>Values are integers modulo n. The client reads anything above n/2 as negative, which is how a negative z would come back.</p>` },
+{ key:"No ReLU", who:"server", whoT:"server", at:1, budget:"0 extra rounds", scale:"40·z", err:()=>0,
+  title:"Why ReLU is impossible here",
+  cap:()=>`ReLU needs a comparison, and every polynomial approximation needs z·z. Paillier can only add and scale, so the server is stuck at the linear part.`,
+  scene(){ const op=(y,t,ok)=>`<g class="op ${ok?"c-ok":"c-warn"}"><rect x="40" y="${y}" width="320" height="40" rx="6" fill="currentColor" fill-opacity=".1" stroke="currentColor" stroke-width="2"/><text x="56" y="${y+25}" font-size="14" fill="currentColor" class="mono">${t}</text><text x="340" y="${y+26}" text-anchor="end" font-size="18" fill="currentColor">${ok?"✓":"✗"}</text></g>`;
+    return svg(290,`${small(40,30,"WHAT THE SERVER CAN COMPUTE ON Enc(z)")}
+      ${op(42,"Enc(z₁ + z₂)",1)}${op(90,"Enc(k · z), k public",1)}${op(138,"Enc(z · z)",0)}${op(186,"Enc(max(0, z))",0)}
+      <g class="c-muted">${lbl(400,100,"Every function the server can reach is")}${lbl(400,120,"affine: a·z + c.")}${lbl(400,164,"ReLU and its polynomial stand-ins")}${lbl(400,184,"(CKKS lesson) need degree ≥ 2.")}</g>
+      ${small(40,262,"This is the textbook reason pre-2009 private ML mixed Paillier with interaction or garbled circuits.")}`,
+      "Addition and scalar multiplication are possible on Paillier ciphertexts; squaring and ReLU are not."); },
+  play(){ slide(".op",-30,0,0,200); fade(".c-muted text",900); },
+  math:()=>`<p>Paillier is additively homomorphic: Enc is a group homomorphism from (Z_n, +) to (Z*_{n²}, ×). There is no second operation corresponding to plaintext multiplication of two ciphertexts.</p>`,
+  explain:()=>`<p>The server holds Enc(40z) and wants Enc(ReLU(z)). With only addition and scaling, every value it can produce has the form a·z + c for public a and c. ReLU is not of that form, and neither is any polynomial of degree two or more, so even the CKKS trick of approximating ReLU is unavailable.</p><p>This is what "partially homomorphic" means: one operation, not two. Fully homomorphic schemes were invented precisely to add the missing multiplication.</p><p>Practical systems built on Paillier therefore ask someone else to do the non-linear step, usually the client, in an extra round of communication. The next step shows the simplest safe way to do that.</p>` },
+{ key:"Helper round", who:"both", whoT:"interactive", at:()=>0.5, budget:"1 extra round", scale:"40·z", err:()=>Math.abs(R.yval-R.relu),
+  title:"ReLU with one extra round trip",
+  cap:()=>`The server hides z by a random r > 0 and sends Enc(r·z). The client decrypts ${big(R.rz)}, keeps it if positive, re-encrypts, and the server divides by r. Result: Enc(${big(R.reluI)}), so y = <b>${f(R.yval)}</b>.`,
+  scene(){ return svg(300,`
+      <g class="c-server"><rect x="20" y="20" width="230" height="250" rx="10" fill="currentColor" fill-opacity=".05" stroke="currentColor" stroke-dasharray="5 5"/>${lbl(36,44,"SERVER","font-weight=\"700\"")}</g>
+      <g class="c-client"><rect x="550" y="20" width="230" height="250" rx="10" fill="currentColor" fill-opacity=".05" stroke="currentColor" stroke-dasharray="5 5"/>${lbl(566,44,"CLIENT","font-weight=\"700\"")}</g>
+      <g class="h1">${tile(36,64,198,40,"Enc(z)^r, r = "+R.r,"c-server","",12.5)}</g>
+      <g class="h1">${arrow(256,84,544,84,"ahs","c-server")}${lbl(400,74,"Enc(r·40z)",'text-anchor="middle"')}</g>
+      <g class="h2">${tile(566,64,198,40,"decrypt: "+big(R.rz),"c-client","",12.5)}${tile(566,116,198,40,"ReLU → "+big(R.reluR),"c-client","",12.5)}</g>
+      <g class="h3">${arrow(544,176,256,176,"ahc","c-client")}${lbl(400,166,"Enc(ReLU(r·40z))",'text-anchor="middle"')}</g>
+      <g class="h4">${tile(36,156,198,40,"^ r⁻¹ mod n","c-server","",12.5)}${tile(36,208,198,44,"Enc("+big(R.reluI)+")","c-ok","",14)}</g>
+      <g class="c-noise h2">${small(566,190,"client learns: sign of z")}${small(566,206,"and r·z (z hidden by r)")}</g>
+      ${small(266,250,"server learns nothing: it only sees ciphertexts")}`,
+      "The server sends a blinded encryption to the client, the client applies ReLU to the decrypted blinded value and sends it back encrypted, and the server unblinds it."); },
+  play(){ pop(".h1",0); fade(".h2",700); slide(".h3",60,0,1300); pop(".h4",1900,200); },
+  math:()=>`<div class="formula">server: Enc(40z)^r = Enc(r·40z) = ${hx(R.blind,K.n2)}</div><div class="formula">client: Dec = ${R.rz} → ReLU = ${R.reluR} → Enc(${R.reluR})</div><div class="formula">server: Enc(${R.reluR})^{r⁻¹ mod n} = Enc(${R.reluI}),  since ReLU(r·u) = r·ReLU(u) for r > 0</div>`,
+  explain:()=>`<p>The trick uses one property of ReLU: for any r > 0, ReLU(r·u) = r·ReLU(u). The server picks a secret random r, raises the ciphertext to r, and sends Enc(r·40z) to the client.</p><p>The client decrypts, applies ReLU to the blinded number and sends back a fresh encryption. The server raises it to r⁻¹ mod n, which removes the blinding exactly because Paillier is exact. The server ends up holding Enc(ReLU(40z)) without having seen anything in the clear.</p><p>The price is privacy and rounds. The client learns the sign of z, and the product r·z, which hides |z| only up to the size of r. That is information about the server's model. Every layer adds a round trip, which is the interactive regime the SoK deliberately excludes. Lessons 17–19 show how MPC protocols do this step without leaking the sign.</p>` },
+{ key:"Damgård–Jurik", who:"server", whoT:"server", at:1, budget:"0 extra rounds", scale:"40·10²⁰·z", err:()=>Math.abs(R.dval-R.z),
+  title:"Damgård–Jurik: a bigger plaintext space",
+  cap:()=>`Working mod n³ instead of n² gives plaintexts mod n², about ${(K.n2).toString(2).length} bits instead of ${K.n.toString(2).length}. The same neuron at scale 10²⁰ decrypts to <b>${f(R.dval,6)}</b>.`,
+  scene(){ const nb=K.n.toString(2).length, n2b=K.n2.toString(2).length, sb=R.dzi.toString(2).length, X0=270, Wd=420;
+    return svg(260,`
+      ${small(40,34,"PLAINTEXT SPACE IN BITS")}
+      ${lbl(40,66,"Paillier, mod n")}<g class="c-server"><rect class="bb" x="${X0}" y="50" width="${Wd*nb/n2b}" height="24" rx="3" fill="currentColor" fill-opacity=".55"/><text x="${X0+Wd*nb/n2b+8}" y="67" font-size="12" fill="currentColor">${nb} bits</text></g>
+      ${lbl(40,110,"Damgård–Jurik s = 2, mod n²")}<g class="c-server"><rect class="bb" x="${X0}" y="94" width="${Wd}" height="24" rx="3" fill="currentColor"/><text x="${X0+Wd+8}" y="111" font-size="12" fill="currentColor">${n2b} bits</text></g>
+      ${lbl(40,154,"our result 40·10²⁰·z")}<g class="c-ok"><rect class="bb" x="${X0}" y="138" width="${Wd*sb/n2b}" height="24" rx="3" fill="currentColor"/><text x="${X0+Wd*sb/n2b+8}" y="155" font-size="12" fill="currentColor">${sb} bits: too big for Paillier's n</text></g>
+      ${small(40,200,"decrypted: "+R.dzi.toString()+"  ÷ 4·10²¹  =  "+f(R.dval,6))}
+      ${small(40,222,"ciphertexts grow to mod n³ ("+K.n.toString(2).length*3+" bits) and decryption needs an iterative extraction")}`,
+      "Bar chart comparing Paillier's plaintext size with Damgård–Jurik's doubled plaintext size, which fits the high-precision neuron result."); },
+  play(){ growX(".bb",0,250); },
+  math:()=>`<div class="formula">Enc(m) = (1 + n)ᵐ · r^{n²} mod n³,   m ∈ Z_{n²}</div><div class="formula">x·10²⁰ = [${R.xd.join(", ")}],  result = ${R.dzi}  (expected ${R.zexact*S20})</div><p>Decryption raises to λ and extracts the exponent of (1 + n) digit by digit in base n (Damgård–Jurik, PKC 2001, Theorem 1).</p>`,
+  explain:()=>`<p>Damgård and Jurik generalised Paillier from n² to n^(s+1). With s = 2, ciphertexts live modulo n³ and plaintexts modulo n². The operations are unchanged: multiply to add, exponentiate to scale.</p><p>The gain is plaintext size. Here we run the same neuron with inputs scaled by 10²⁰ instead of 10. The result, about 1.4·10²¹, would overflow Paillier's 63-bit plaintext space but fits comfortably in Damgård–Jurik's.</p><p>The costs are bigger ciphertexts and a slower, iterative decryption. The non-linear limitation is exactly the same: there is still no way to multiply two ciphertexts.</p>` }
+];
+const cfg={ id:"paillier", title:"Paillier Step by Step", compute,
+  setup:()=>{ K=PHE.paillier(32); DJ=PHE.dj(K); },
+  reseedLabel:"New random primes",
+  inputNote:"x is scaled by 10 and rounded, so use one decimal place.",
+  status:{budgetLabel:"Interaction", scaleLabel:"Encoding", errLabel:"Error so far"},
+  footer:'Real toy Paillier and Damgård–Jurik (s = 2) with BigInt: two random 32-bit primes (Miller–Rabin), n ≈ 63 bits. Real keys use 3072-bit n. Schemes: Paillier, <a href="https://doi.org/10.1007/3-540-48910-X_16">EUROCRYPT 1999</a>; Damgård and Jurik, <a href="https://doi.org/10.1007/3-540-44586-2_9">PKC 2001</a>.',
+  cardResult:()=>`z = ${f(R.zval)} exactly; y = ${f(R.yval)} only with one extra client round`,
+  steps };
+steps.push(LS.cardStep(cfg,{budget:"1 extra round",scale:"integers",name:"Paillier",err:()=>Math.abs(R.yval-R.relu)}));
+LS.start(cfg);
+})();
+</script>
+</body>
+</html>

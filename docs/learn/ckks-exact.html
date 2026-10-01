@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CKKS as an Exact Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lesson.css">
+</head>
+<body>
+<div id="app"></div>
+<script src="lessons.js"></script>
+<script src="cards/ckks-exact.js"></script>
+<script src="lesson.js"></script>
+<script src="engines/ckks.js"></script>
+<script>
+(function(){
+"use strict";
+const {svg,tile,lbl,small,arrow,pop,fade,draw,slide,blink,growX,f,fe,sup}=LS;
+const C=CKKS.make({N:4,deltaBits:20,q0Bits:30,levels:8,pBits:200});
+const W=LS.W, B=LS.B, P=32, C0=0.09375, C1=0.5, C2=0.46875;
+const ip=k=>[BigInt(k),0n,0n,0n];            // integer constant (keeps the scale)
+/* ---- functional-bootstrapping simulation: trig interpolation of a LUT over Z_32 ---- */
+const lutBit=i=>t=>((((t%P)+P)%P)>>i)&1;
+function dft(fn){ const c=[]; for(let k=0;k<P;k++){ let re=0,im=0; for(let t=0;t<P;t++){ const a=-2*Math.PI*k*t/P; re+=fn(t)*Math.cos(a); im+=fn(t)*Math.sin(a);} c.push([re/P,im/P]); } return c; }
+function expi(th,d,r){ const x=th/2**r; let re=0,im=0,tr=1,ti=0; for(let n=0;n<=d;n++){ re+=tr; im+=ti; const nr=-ti*x/(n+1), ni=tr*x/(n+1); tr=nr; ti=ni; } for(let j=0;j<r;j++){ const a=re*re-im*im, b=2*re*im; re=a; im=b; } return [re,im]; }
+function evalTrig(c,t,approx){ const u=approx?expi(2*Math.PI*t/P,3,4):[Math.cos(2*Math.PI*t/P),Math.sin(2*Math.PI*t/P)]; let pr=1,pi=0,s=0; for(let k=0;k<P;k++){ s+=c[k][0]*pr-c[k][1]*pi; const a=pr*u[0]-pi*u[1], b=pr*u[1]+pi*u[0]; pr=a; pi=b; } return s; }
+const COEF=[0,1,2,3,4].map(i=>dft(lutBit(i)));
+/* ---- homomorphic helpers ---- */
+const clean=v=>{ const v2=C.rescale(C.mulCt(v,v)); const v3=C.rescale(C.mulCt(v2,C.down(v,v2.l))); return C.sub(C.mulPt(C.down(v2,v3.l),ip(3)),C.mulPt(v3,ip(2))); };
+let R;
+function compute(inp){
+  const x=[inp.x1,inp.x2], n=LS.neuron(x);
+  const ct=C.encrypt(C.encode(x));
+  const c1=C.rescale(C.mulPt(ct,C.encode([40*W[0],40*W[1]])));
+  const ct40=C.addPt(C.add(c1,C.rotate(c1,1)),C.encode([40*B,40*B]));
+  const t=C.val(ct40)[0], tExact=40*n.z, tInt=Math.round(t);
+  const bitsTrue=[0,1,2,3,4].map(i=>lutBit(i)(((tInt%P)+P)%P));
+  const fbs=COEF.map(c=>evalTrig(c,t,true));                 // simulated FBS output (approximate exponentials)
+  const fbsExactPoly=COEF.map(c=>evalTrig(c,t,false));
+  // encrypt the simulated FBS outputs so the rest runs on ciphertexts
+  const b0=fbs.map(v=>C.encrypt(C.encode([v,v])));
+  const b1=b0.map(clean), b2=b1.map(clean);
+  const vb=arr=>arr.map(c=>C.val(c)[0]);
+  const V0=vb(b0), V1=vb(b1), V2=vb(b2);
+  let S=C.mulPt(b2[0],ip(1)); for(let i=1;i<4;i++) S=C.add(S,C.mulPt(b2[i],ip(2**i)));
+  const notSign=C.addPt(C.mulPt(b2[4],ip(-1)),C.cst(1));
+  const r=C.rescale(C.mulCt(S,notSign)), y=C.rescale(C.mulPt(r,C.cst(1/40)));
+  // logic gates on SIMD bit slots: a=[b1,b0], b=[b3,b3]
+  const ga=C.encrypt(C.encode([fbs[1],fbs[0]])), gb=C.encrypt(C.encode([fbs[3],fbs[3]]));
+  const d=C.sub(ga,gb), xor=clean(C.rescale(C.mulCt(d,d))), and=clean(C.rescale(C.mulCt(ga,gb)));
+  const poly=C0+C1*n.z+C2*n.z*n.z;
+  R={x,n,t,tExact,tInt,bitsTrue,fbs,fbsExactPoly,V0,V1,V2,S:C.val(S)[0],notSign:C.val(notSign)[0],r:C.val(r)[0],y:C.val(y)[0],yl:y.l,
+     ga:[fbs[1],fbs[0]],gb:[fbs[3],fbs[3]],xor:C.val(xor),and:C.val(and),poly,lv:{t:ct40.l,b2:b2[0].l,r:r.l,y:y.l}};
+  return R;
+}
+const box=(x,y,w,h,t,cls,sub)=>`<g class="${cls} bx"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8" fill="currentColor" fill-opacity=".08" stroke="currentColor" stroke-width="2"/><text x="${x+w/2}" y="${y+(sub?h/2-2:h/2+5)}" text-anchor="middle" font-size="13.5" font-weight="700" fill="currentColor">${t}</text>${sub?`<text x="${x+w/2}" y="${y+h/2+15}" text-anchor="middle" font-size="11.5" fill="currentColor" class="c-muted">${sub}</text>`:""}</g>`;
+const maxErr=(V)=>Math.max(...V.map((v,i)=>Math.abs(v-R.bitsTrue[i])));
+const steps=[
+{ key:"Idea", who:"both", whoT:"overview", at:0.5, budget:9, scale:"reals", err:()=>0,
+  title:"Can approximate arithmetic give exact answers?",
+  cap:()=>`Scaled by 40, our neuron's z is the integer ${Math.round(R.tExact)}. CKKS would hold it as ${f(R.t,7)}. If the server could round that to ${R.tInt} and read its bits, ReLU would be exact.`,
+  scene(){ const pl=LS.plot(60,740,80,80,R.tInt-1.5,R.tInt+1.5,0,1);
+    let g=`<line x1="60" y1="80" x2="740" y2="80" stroke="currentColor" stroke-width="2" opacity=".5"/>`;
+    [-1,0,1].forEach(k=>{ const v=R.tInt+k; g+=`<line x1="${pl.sx(v)}" y1="68" x2="${pl.sx(v)}" y2="92" stroke="currentColor" stroke-width="2"/>`+small(pl.sx(v),112,String(v),'text-anchor="middle"'); });
+    g+=`<g class="c-client pt"><circle cx="${pl.sx(R.t)}" cy="80" r="8" fill="currentColor"/><text x="${pl.sx(R.t)}" y="52" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">CKKS value ${f(R.t,7)}</text></g>`;
+    g+=`<g class="c-noise"><text x="400" y="142" text-anchor="middle" font-size="12.5" fill="currentColor">distance to ${R.tInt}: ${fe(Math.abs(R.t-R.tInt))}, far below the gap of 1 between integers</text></g>`;
+    const tools=[["Functional bootstrapping","lookup tables while refreshing","c-server"],["BLEACH cleaning","push bits back to 0 or 1","c-noise"],["Bit-CKKS, integer computer","logic and 64-bit integers","c-ok"]];
+    tools.forEach((t,i)=>{ g+=box(40+i*250,174,220,62,t[0],t[2],t[1]); });
+    return svg(256,g,"A number line with the CKKS value sitting almost exactly on the integer, and three techniques that exploit this."); },
+  play(){ pop(".pt",0); pop(".bx",600,200); },
+  math:()=>`<div class="formula">40·z = 40·(${R.x[0]}·0.5 + ${R.x[1]}·(−0.25) + 0.1) = ${f(R.tExact,4)}</div><p>All weights are scaled by 40 so the neuron produces an integer. The CKKS value differs from it only by encryption noise.</p>`,
+  explain:()=>`<p>Lesson 1 ended with an answer of 0.326 instead of 0.35, because ReLU had to be replaced by a polynomial. The other half of the error, encryption noise, was only about 10⁻⁶. That suggests a different strategy: make the data integers, so that noise is a tiny distance from the true value, and then compute non-linear functions <i>exactly</i> on those integers.</p>
+<p>The obstacle is that CKKS has no rounding or comparison instruction. Three lines of work get around that. Functional bootstrapping evaluates a lookup table as part of bootstrapping. BLEACH cleaning keeps values that should be bits close to 0 or 1. Bit-CKKS and the CKKS integer computer then build exact logic and integer arithmetic on top.</p>
+<p>The result is a CKKS that can behave like TFHE (Lesson 6) when needed while keeping its packing, which is why these papers are among the most active recent CKKS research.</p>`},
+
+{ key:"×40", who:"server", whoT:"server", at:1, budget:8, scale:"Δ", err:()=>Math.abs(R.t-R.tExact),
+  title:"Compute the neuron on integers",
+  cap:()=>`The server uses weights scaled by 40, rotates and adds as in Lesson 1, and adds 40·b = 4. The ciphertext now holds ${f(R.t,7)}, the integer ${R.tInt} plus noise.`,
+  scene(){ let g=small(40,34,"ENCRYPTED x")+`<g class="t1">${tile(40,44,110,48,String(R.x[0]),"c-client")}</g><g class="t1">${tile(160,44,110,48,String(R.x[1]),"c-client")}</g>`;
+    g+=`<text x="300" y="76" font-size="22" fill="currentColor">×</text>`+small(330,34,"WEIGHTS × 40")+`<g class="t2">${tile(330,44,110,48,"20","c-server")}</g><g class="t2">${tile(450,44,110,48,"−10","c-server")}</g>`;
+    g+=arrow(300,98,300,136,"ahs","c-server")+small(310,122,"rescale, rotate, add, + 4");
+    g+=`<g class="t3">${tile(200,140,200,56,f(R.t,7),"c-server","",16)}</g>`+small(410,172,"both slots hold 40·z");
+    g+=`<g class="c-ok t3"><text x="300" y="232" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">nearest integer: ${R.tInt} = ${R.tInt>=0?"0":"1"}${[3,2,1,0].map(i=>R.bitsTrue[i]).join("")} in 5-bit two's complement</text></g>`;
+    g+=`<g class="bitrow">${[4,3,2,1,0].map((i,k)=>tile(560+k*44,140,38,56,String(R.bitsTrue[i]),i===4?"c-warn":"c-ok","",16)).join("")}</g>`;
+    g+=[4,3,2,1,0].map((i,k)=>small(579+k*44,214,i===4?"sign":"2"+sup(i),'text-anchor="middle"')).join("");
+    return svg(250,g,"Encrypted inputs multiplied by weights scaled by 40 give a ciphertext holding forty times z, whose nearest integer and its bits are shown."); },
+  play(){ pop(".t1",0,120); slide(".t2",0,-40,300,120); pop(".t3",900,0); pop(".bitrow",1400); },
+  math:()=>`<div class="formula">ct = Enc(x),  ct ← rescale(ct × [20, −10]),  ct ← ct + rotate(ct) + 4</div><div class="formula">decrypts to ${f(R.t,8)}   (exact 40z = ${f(R.tExact,8)}, level L${R.lv.t})</div>`,
+  explain:()=>`<p>This is the linear part of Lesson 1 with every weight multiplied by 40, so the exact result is the integer 14. Only one level is used, and the value sits within about 10⁻⁶ of 14.</p>
+<p>The bits shown on the right are what we want the server to obtain, still encrypted. In 5-bit two's complement the top bit is the sign, so ReLU(z) is simply "the lower four bits, unless the sign bit is set". Computing those bits from an approximate encrypted number is the job of functional bootstrapping.</p>`},
+
+{ key:"FBS", who:"server", whoT:"server", at:1, budget:9, scale:"LUT", err:()=>maxErr(R.fbs), sim:true,
+  title:"Functional bootstrapping reads a lookup table",
+  cap:()=>`Any function on 32 integers equals a sum of 32 waves. Functional bootstrapping evaluates that sum while refreshing the ciphertext. For the sign bit at t = ${f(R.t,4)} it returns ${f(R.fbs[4],4)}, close to the true ${R.bitsTrue[4]}.`,
+  scene(){ const pl=LS.plot(60,520,240,40,-16.5,15.5,-0.35,1.35); const c=COEF[4];
+    let g=`<line x1="60" y1="${pl.sy(0)}" x2="520" y2="${pl.sy(0)}" stroke="currentColor" opacity=".35"/><line x1="${pl.sx(0)}" y1="40" x2="${pl.sx(0)}" y2="250" stroke="currentColor" opacity=".35"/>`;
+    [-16,-8,0,8,15].forEach(t=>{ g+=small(pl.sx(t),272,String(t).replace("-","−"),'text-anchor="middle"'); }); g+=small(pl.sx(0)-6,pl.sy(1)+4,"1",'text-anchor="end"');
+    g+=`<g class="c-noise"><path class="cv" pathLength="1" stroke-dasharray="1" d="${pl.path(t=>evalTrig(c,t,false),600)}" fill="none" stroke="currentColor" stroke-width="2"/></g>`;
+    let dots=""; for(let t=-16;t<16;t++) dots+=`<circle cx="${pl.sx(t)}" cy="${pl.sy(lutBit(4)(t))}" r="3.5" fill="var(--client)"/>`; g+=`<g class="dt">${dots}</g>`;
+    g+=`<g class="c-ok pt"><circle cx="${pl.sx(R.t)}" cy="${pl.sy(R.fbs[4])}" r="7" fill="none" stroke="currentColor" stroke-width="3"/><text x="${pl.sx(R.t)}" y="${pl.sy(R.fbs[4])+26}" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">t = ${f(R.t,3)}</text></g>`;
+    g+=`<g class="c-client"><circle cx="72" cy="296" r="4" fill="currentColor"/><text x="82" y="300" font-size="12" fill="currentColor">table: sign bit of t</text></g><g class="c-noise"><rect x="250" y="294" width="14" height="4" fill="currentColor"/><text x="270" y="300" font-size="12" fill="currentColor">sum of 32 waves (passes every dot)</text></g>`;
+    g+=small(560,48,"ALL FIVE BITS FROM ONE t","font-weight=\"700\"");
+    [4,3,2,1,0].forEach((i,k)=>{ const y=62+k*44; g+=`<g class="br">${small(560,y+24,i===4?"sign":"bit "+i)}${tile(610,y,80,36,f(R.fbs[i],4),"c-noise","",13)}<text x="700" y="${y+23}" font-size="12" fill="currentColor" class="c-muted">→ ${R.bitsTrue[i]}</text></g>`; });
+    return svg(310,g,"The sign-bit lookup table as dots and its trigonometric interpolant as a curve through all of them, with the five extracted noisy bits listed on the right."); },
+  play(){ fade(".dt",0); draw(".cv",300,1300); pop(".pt",1600); pop(".br",1800,120); },
+  math:()=>`<div class="formula">f(t) = Σₖ cₖ · e^{2πi·k·t/32},   cₖ = (1/32) Σₜ LUT(t)·e^{−2πi·k·t/32}</div>
+    <table class="nums"><thead><tr><th>bit</th><th>with exact waves</th><th>with homomorphic-style waves</th><th>true</th></tr></thead><tbody>${[4,3,2,1,0].map(i=>`<tr><td>${i===4?"sign":"bit "+i}</td><td class="v">${f(R.fbsExactPoly[i],7)}</td><td class="v">${f(R.fbs[i],7)}</td><td class="v">${R.bitsTrue[i]}</td></tr>`).join("")}</tbody></table>
+    <p>The "homomorphic-style" column computes e^{iθ} the way bootstrapping does: a degree-3 Taylor polynomial of e^{iθ/16}, squared four times. That approximation is where the 10⁻³ errors come from. This step is a plaintext simulation of the mechanism; the toy does not run full bootstrapping.</p>`,
+  explain:()=>`<p>A lookup table on the integers 0…31 can always be written as a trigonometric polynomial with 32 terms, by the discrete Fourier transform. The curve in the figure passes exactly through every table value, and between integers it wiggles, which does not matter because t is always very close to an integer.</p>
+<p>Ordinary CKKS bootstrapping already evaluates one trigonometric function: the sine in EvalMod (Lesson 2). <b>General functional bootstrapping</b> (Alexandru, Kim, Polyakov, CRYPTO 2025) replaces that sine with the trigonometric polynomial of any table, so the ciphertext comes out of bootstrapping already holding f(t). It works on all slots at once, which TFHE (Lesson 6) cannot do.</p>
+<p>The outputs are not exactly 0 or 1. The exponentials inside bootstrapping are themselves approximated, which leaves errors of about 10⁻³. Follow-ups such as the Fourier-extension method (2026/367), SWIFT (2026/1163) and low-rank FBS (2026/1264) reduce that error or the cost.</p>`},
+
+{ key:"Clean", who:"server", whoT:"server", at:1, budget:5, scale:"bits", err:()=>maxErr(R.V2),
+  title:"BLEACH cleaning pushes bits back to 0 and 1",
+  cap:()=>`The polynomial h(v) = 3v² − 2v³ is flat at 0 and at 1, so values near a bit move closer to it. Two encrypted cleanings shrink the worst bit error from ${fe(maxErr(R.V0))} to ${fe(maxErr(R.V2))}.`,
+  scene(){ const pl=LS.plot(40,290,260,40,-0.15,1.15,-0.15,1.15); const h=v=>3*v*v-2*v*v*v;
+    let g=`<line x1="40" y1="${pl.sy(0)}" x2="290" y2="${pl.sy(0)}" stroke="currentColor" opacity=".3"/><line x1="${pl.sx(0)}" y1="40" x2="${pl.sx(0)}" y2="260" stroke="currentColor" opacity=".3"/>`;
+    g+=`<g class="c-muted"><path d="M${pl.sx(-0.15)},${pl.sy(-0.15)} L${pl.sx(1.15)},${pl.sy(1.15)}" stroke="currentColor" stroke-dasharray="4 4" fill="none"/></g>`;
+    g+=`<g class="c-noise"><path class="cv" pathLength="1" stroke-dasharray="1" d="${pl.path(h,120)}" fill="none" stroke="currentColor" stroke-width="3"/></g>`;
+    g+=small(pl.sx(1),278,"1",'text-anchor="middle"')+small(pl.sx(0),278,"0",'text-anchor="middle"')+`<g class="c-noise"><text x="${pl.sx(-0.12)}" y="${pl.sy(1.12)}" font-size="12.5" font-weight="700" fill="currentColor">h(v) = 3v² − 2v³</text></g>`+small(pl.sx(0.62),pl.sy(0.5)+16,"v (dashed)");
+    const cols=[["after FBS",R.V0],["clean once",R.V1],["clean twice",R.V2]];
+    g+=small(330,40,"bit")+cols.map((c,j)=>small(400+j*130,40,c[0].toUpperCase(),'font-weight="700"')).join("");
+    [4,3,2,1,0].forEach((i,k)=>{ const y=54+k*42; g+=small(330,y+24,i===4?"sign":"bit "+i); cols.forEach((c,j)=>{ const e=Math.abs(c[1][i]-R.bitsTrue[i]); g+=`<g class="cl${j}">${tile(400+j*130,y,120,34,f(c[1][i],j===2?7:5),j===0?"c-noise":j===1?"c-server":"c-ok","",12.5)}</g>`; }); });
+    g+=small(330,292,"worst error:")+cols.map((c,j)=>`<g class="${j===0?"c-noise":j===1?"c-server":"c-ok"}"><text x="${460+j*130}" y="292" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">${fe(maxErr(c[1]))}</text></g>`).join("");
+    return svg(306,g,"The cleaning polynomial curve flattens near zero and one, and a table shows five encrypted bits getting closer to exact bits after each cleaning."); },
+  play(){ draw(".cv",0,900); pop(".cl0",500,60); pop(".cl1",1100,60); pop(".cl2",1700,60); },
+  math:()=>`<div class="formula">h(0 + ε) = 3ε² − 2ε³ ≈ 3ε²,    h(1 + ε) = 1 − 3ε² − 2ε³ ≈ 1 − 3ε²</div><p>Each cleaning costs two levels (v², then v³). The integer coefficients 3 and 2 multiply without using a level. After the second cleaning the error stops shrinking, because it has reached the CKKS noise floor of about 10⁻⁶.</p>`,
+  explain:()=>`<p>Bits that come out of functional bootstrapping are "almost bits". Every later operation on them adds error, and logic gates multiply errors together. <b>BLEACH</b> (Drucker, Moshkowich, Pelleg, Shaul, J. Cryptology 2024) keeps them in check with a tiny polynomial that has 0 and 1 as attracting fixed points.</p>
+<p>The cubic h(v) = 3v² − 2v³ has zero slope at 0 and at 1. An error ε turns into about 3ε², so the number of correct digits roughly doubles with each application. Here both cleanings run on real ciphertexts in the toy engine, and you can see the errors drop until they hit the noise floor set by Δ.</p>
+<p>Cleaning is cheap compared to bootstrapping (two levels) and can be applied to all slots at once, so CKKS can carry exact bits through long computations.</p>`},
+
+{ key:"ReLU", who:"server", whoT:"server", at:1, budget:3, scale:"Δ", err:()=>Math.abs(R.y-R.n.relu),
+  title:"ReLU from bits: exact this time",
+  cap:()=>`Add the four lower bits with weights 8, 4, 2, 1 to get ${f(R.S,4)}. Multiply by (1 − sign) = ${f(R.notSign,4)} and by 1/40. The result is ${f(R.y,6)}, against a true ReLU of ${f(R.n.relu,6)}.`,
+  scene(){ let g=small(40,34,"CLEANED BITS");
+    [3,2,1,0].forEach((i,k)=>{ g+=`<g class="b">${tile(40+k*90,44,80,40,f(R.V2[i],3),"c-ok","",13)}</g>`+small(80+k*90,102,"× "+(2**i),'text-anchor="middle"'); });
+    g+=`<g class="c-muted"><path d="M40,112 v8 h350 v-8 M215,120 v24" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#ahm)"/></g>`;
+    g+=`<g class="s">${tile(140,148,150,44,"S = "+f(R.S,4),"c-server","",14)}</g>`;
+    g+=small(480,34,"SIGN BIT")+`<g class="b">${tile(480,44,80,40,f(R.V2[4],3),"c-warn","",13)}</g>`+arrow(520,86,520,144,"ahw","c-warn")+small(530,120,"1 − sign");
+    g+=`<g class="s">${tile(450,148,140,44,f(R.notSign,4),"c-warn","",14)}</g>`;
+    g+=`<g class="c-muted"><path d="M215,194 C215,224 360,212 360,236 M520,194 C520,224 360,212 360,236" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#ahm)"/></g>`;
+    g+=small(40,262,"multiply (ct × ct), then × 1/40");
+    g+=`<g class="y">${tile(260,240,200,52,"y = "+f(R.y,6),"c-ok","",16)}</g>`;
+    g+=small(600,268,"true ReLU(z) = "+f(R.n.relu,6));
+    return svg(306,g,"Four cleaned bits weighted by eight, four, two and one are summed, multiplied by one minus the sign bit and scaled, giving y."); },
+  play(){ pop(".b",0,100); pop(".s",700,200); pop(".y",1400); },
+  math:()=>`<div class="formula">ReLU(t) = (1 − b₄) · (8b₃ + 4b₂ + 2b₁ + b₀)   for t in 5-bit two's complement</div>
+    <table class="nums"><tbody><tr><td>S = Σ 2ⁱ bᵢ</td><td class="v">${f(R.S,7)}</td></tr><tr><td>1 − b₄</td><td class="v">${f(R.notSign,7)}</td></tr><tr><td>S·(1 − b₄)</td><td class="v">${f(R.r,7)}</td></tr><tr><td>y = ÷ 40 (level L${R.yl})</td><td class="v">${f(R.y,8)}</td></tr></tbody></table>`,
+  explain:()=>`<p>With exact bits, ReLU becomes simple arithmetic. In two's complement the top bit is 1 exactly when the number is negative. Multiplying the magnitude bits by (1 − sign) therefore zeroes negative inputs and leaves positive ones unchanged.</p>
+<p>The sum with weights 8, 4, 2, 1 uses integer constants and costs no level. The product with (1 − sign) is one ciphertext multiplication, and the final division by 40 is one more. The remaining error is CKKS noise, about 10⁻⁶, instead of the 2.4 × 10⁻² approximation error in Lesson 1.</p>
+<p>A real system would need more bits for realistic activations (8 to 16), and the bit extraction itself costs bootstrapping. The point is that the accuracy no longer depends on a polynomial imitating ReLU.</p>`},
+
+{ key:"Gates", who:"server", whoT:"server", at:1, budget:5, scale:"bits", err:()=>Math.max(...R.xor.map((v,i)=>Math.abs(v-((R.bitsTrue[i===0?1:0]^R.bitsTrue[3])))),...R.and.map((v,i)=>Math.abs(v-((R.bitsTrue[i===0?1:0]&R.bitsTrue[3]))))),
+  title:"Logic gates in every slot at once",
+  cap:()=>`With values kept as bits, XOR is (a − b)² and AND is a·b. Each gate runs on all slots in one ciphertext operation, so CKKS processes many bits in parallel. This is the idea behind Bit-CKKS.`,
+  scene(){ const tv=(a,b)=>[a^b,a&b]; const A0=[R.bitsTrue[1],R.bitsTrue[0]], B0=[R.bitsTrue[3],R.bitsTrue[3]];
+    let g=small(40,34,"SLOT 1")+small(220,34,"SLOT 2");
+    g+=lbl(40,64,"a","font-weight=\"700\"")+`<g class="in">${tile(70,44,120,36,f(R.ga[0],4),"c-noise","",13)}${tile(250,44,120,36,f(R.ga[1],4),"c-noise","",13)}</g>`;
+    g+=lbl(40,110,"b","font-weight=\"700\"")+`<g class="in">${tile(70,90,120,36,f(R.gb[0],4),"c-noise","",13)}${tile(250,90,120,36,f(R.gb[1],4),"c-noise","",13)}</g>`;
+    g+=arrow(220,132,220,160,"ahs","c-server")+small(232,152,"one op per gate, then clean");
+    g+=lbl(20,196,"a XOR b","font-weight=\"700\"")+`<g class="out">${tile(90,176,100,36,f(R.xor[0],5),"c-ok","",13)}${tile(270,176,100,36,f(R.xor[1],5),"c-ok","",13)}</g>`;
+    g+=lbl(20,244,"a AND b","font-weight=\"700\"")+`<g class="out">${tile(90,224,100,36,f(R.and[0],5),"c-ok","",13)}${tile(270,224,100,36,f(R.and[1],5),"c-ok","",13)}</g>`;
+    g+=small(90,280,"expected XOR "+tv(A0[0],B0[0])[0]+" / "+tv(A0[1],B0[1])[0]+",  AND "+tv(A0[0],B0[0])[1]+" / "+tv(A0[1],B0[1])[1]);
+    g+=`<g class="c-muted"><line x1="420" y1="30" x2="420" y2="290" stroke="currentColor" opacity=".3"/></g>`;
+    g+=lbl(440,50,"Throughput, as reported","font-weight=\"700\"")+small(440,72,"(cited, not computed here)");
+    g+=`<g class="ct">`+[["Bit-CKKS (EUROCRYPT 2024)","bootstraps thousands of bits per ciphertext,","amortized faster than TFHE for large batches"],["CKKS integer computer (TCHES 2025)","exact 64-bit integer arithmetic","on discrete CKKS"],["XBOOT (TCHES 2025)","free XOR gates; BLEACH-style XOR","costs one multiplication"]].map((r,i)=>`<text x="440" y="${110+i*62}" font-size="12.5" font-weight="700" fill="currentColor">${r[0]}</text><text x="440" y="${128+i*62}" font-size="12" fill="currentColor" class="c-muted">${r[1]}</text><text x="440" y="${144+i*62}" font-size="12" fill="currentColor" class="c-muted">${r[2]}</text>`).join("")+`</g>`;
+    return svg(300,g,"Two slots of encrypted bits a and b produce XOR and AND results in both slots at once, next to a note on reported throughput."); },
+  play(){ pop(".in",0,100); pop(".out",700,150); fade(".ct",1200); },
+  math:()=>`<div class="formula">XOR(a, b) = (a − b)²,   AND(a, b) = a·b,   NOT(a) = 1 − a</div>
+    <table class="nums"><thead><tr><th>gate</th><th>slot 1</th><th>slot 2</th></tr></thead><tbody><tr><td>XOR (cleaned)</td><td class="v">${f(R.xor[0],7)}</td><td class="v">${f(R.xor[1],7)}</td></tr><tr><td>AND (cleaned)</td><td class="v">${f(R.and[0],7)}</td><td class="v">${f(R.and[1],7)}</td></tr></tbody></table>`,
+  explain:()=>`<p>Once values are guaranteed to be close to bits, boolean logic is arithmetic: AND is a product, NOT is 1 − a and XOR is (a − b)². Every gate is applied to every slot of the ciphertext at once. With 32,768 slots, one CKKS multiplication evaluates 32,768 gates.</p>
+<p><b>Bit-CKKS</b> (Bae, Cheon, Kim, Stehlé, EUROCRYPT 2024) makes bootstrapping itself work on bits, so such logic can run for unlimited depth. The <b>CKKS integer computer</b> (Kim, TCHES 2025) builds exact 64-bit integer arithmetic on discrete CKKS with radix decomposition. This is territory long held by TFHE and BGV/BFV.</p>
+<p>For LLM inference this matters for the exact parts of a model: argmax and token sampling, quantized integer layers, and comparisons inside Softmax and LayerNorm.</p>`},
+
+{ key:"Compare", who:"client", whoT:"client", at:0, budget:3, scale:"Δ", err:()=>Math.abs(R.y-R.n.relu),
+  title:"Decrypt: exact up to CKKS noise",
+  cap:()=>`The client decrypts ${f(R.y,6)}. Lesson 1's polynomial ReLU gave ${f(R.poly,4)} for the same neuron. The error dropped from ${fe(Math.abs(R.poly-R.n.relu))} to ${fe(Math.abs(R.y-R.n.relu))}.`,
+  scene(){ const W0=230,W1=740, lg=v=>Math.max(0,Math.min(1,(Math.log10(Math.max(v,1e-8))+8)/8)), bw=v=>(W1-W0)*lg(v);
+    const e1=Math.abs(R.poly-R.n.relu), e2=Math.abs(R.y-R.n.relu);
+    let g=`<g class="c-client big"><text x="40" y="60" font-size="13" font-weight="700" fill="currentColor">THIS LESSON</text><text x="40" y="104" font-size="40" font-family="var(--mono)" fill="currentColor">${f(R.y,5)}</text></g>`;
+    g+=`<g class="c-ok big"><text x="320" y="60" font-size="13" font-weight="700" fill="currentColor">TRUE ReLU(z)</text><text x="320" y="104" font-size="40" font-family="var(--mono)" fill="currentColor">${f(R.n.relu,5)}</text></g>`;
+    g+=`<g class="c-server big"><text x="580" y="60" font-size="13" font-weight="700" fill="currentColor">LESSON 1 (p(z))</text><text x="580" y="104" font-size="40" font-family="var(--mono)" fill="currentColor">${f(R.poly,5)}</text></g>`;
+    g+=lbl(40,160,"Error against the true ReLU (log scale)","font-weight=\"700\"");
+    [-8,-6,-4,-2,0].forEach(e=>{ const x=W0+(W1-W0)*(e+8)/8; g+=`<line x1="${x}" y1="174" x2="${x}" y2="270" stroke="currentColor" opacity=".15"/>`+small(x,288,"10"+sup(e),'text-anchor="middle"'); });
+    g+=small(40,200,"Lesson 1: polynomial")+`<g class="c-warn"><rect class="eb" x="${W0}" y="184" width="${bw(e1)}" height="26" rx="3" fill="currentColor"/><text x="${W0+bw(e1)+8}" y="202" font-size="12.5" fill="currentColor">${fe(e1)}</text></g>`;
+    g+=small(40,246,"this lesson: bits")+`<g class="c-ok"><rect class="eb" x="${W0}" y="230" width="${bw(e2)}" height="26" rx="3" fill="currentColor"/><text x="${W0+bw(e2)+8}" y="248" font-size="12.5" fill="currentColor">${fe(e2)}</text></g>`;
+    return svg(300,g,"The decrypted value, the true answer and the Lesson 1 polynomial answer, with a log-scale chart showing the bit-based method has a far smaller error."); },
+  play(){ pop(".big",0,250); growX(".eb",900,300); },
+  math:()=>`<table class="nums"><tbody><tr><td>this lesson</td><td class="v">${f(R.y,8)}</td></tr><tr><td>Lesson 1 polynomial p(z)</td><td class="v">${f(R.poly,8)}</td></tr><tr><td>true ReLU</td><td class="v">${f(R.n.relu,8)}</td></tr></tbody></table>`,
+  explain:()=>`<p>The answer is now exact up to CKKS noise. The remaining 10⁻⁶ could be removed completely by rounding after decryption, because the client knows the result is a multiple of 1/40.</p>
+<p>The price is depth and bootstrapping: bit extraction needs a functional bootstrap, and cleaning costs two levels per round. For one neuron this is far more work than a degree-2 polynomial. It pays off where exactness matters, such as argmax over a vocabulary, quantized integer layers or long computations where approximation errors would pile up.</p>
+<p>The SoK names CKKS functional bootstrapping as a promising route to robustness, for example replacing one high-degree polynomial over a large interval with exact piecewise evaluation.</p>`}
+];
+const cfg={ id:"ckks-exact", title:"CKKS as an Exact Engine", compute, setup:()=>C.keygen(),
+  inputNote:"Change x and every ciphertext is recomputed. 40·z must stay within −16…15 for the 5-bit table.",
+  status:{budgetLabel:"Levels left", budgetCells:9, scaleLabel:"Values are"},
+  footer:'Real toy CKKS: N = 4, Δ = 2²⁰, 8 levels (q up to 2¹⁹⁰), key-switching modulus 2²⁰⁰. The functional-bootstrapping step is a plaintext simulation of the lookup-table mechanism; its outputs are then encrypted and all cleaning, gates and ReLU run on ciphertexts. Papers: <a href="https://eprint.iacr.org/2024/1623">general FBS</a>, <a href="https://eprint.iacr.org/2022/1298">BLEACH</a>, <a href="https://eprint.iacr.org/2024/767">Bit-CKKS</a>, <a href="https://eprint.iacr.org/2025/066">CKKS integer computer</a>.',
+  cardResult:()=>`${f(R.y,6)} for a true ${f(R.n.relu,4)} (exact up to noise)`,
+  steps };
+steps.push(LS.cardStep(cfg,{name:"Exact CKKS",budget:3,err:()=>Math.abs(R.y-R.n.relu)}));
+LS.start(cfg);
+})();
+</script>
+</body>
+</html>

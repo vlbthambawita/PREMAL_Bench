@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TFHE Step by Step</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lesson.css">
+<style>[hidden]{display:none!important}</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="lessons.js"></script>
+<script src="cards/tfhe.js"></script>
+<script src="lesson.js"></script>
+<script src="engines/tfhe.js"></script>
+<script>
+(function(){
+"use strict";
+const {svg,tile,lbl,small,arrow,pop,fade,draw,slide,blink,growX,f,fe,sup,sub,big}=LS;
+const T=TFHE.make(), Q=TFHE.Q, D=T.D, N=T.N, P=T.p, TWO_N=2*N;
+const F=m=>Math.max(0,m-16);                       // the LUT: ReLU after removing the offset 16
+const lg=v=>v?Math.log2(Math.abs(v)).toFixed(1):"0";
+const ang=(k,M)=>2*Math.PI*k/M;                    // clockwise from the top
+const pt=(cx,cy,r,k,M)=>[cx+r*Math.sin(ang(k,M)), cy-r*Math.cos(ang(k,M))];
+const P2=v=>v.toFixed(1);
+let R;
+
+function compute(inp){
+  const x=[inp.x1,inp.x2], q=x.map(v=>Math.round(v*10));
+  const m=2*q[0]-q[1]+4+16, inRange=m>=0&&m<P;
+  const zq=(2*q[0]-q[1]+4)/40, nn=LS.neuron(x);
+  const c1=T.encrypt(q[0]), c2=T.encrypt(q[1]);
+  const c2x=T.lin([[2,c1]],0), cdiff=T.lin([[2,c1],[-1,c2]],0), lin=T.lin([[2,c1],[-1,c2]],20);
+  const r=T.bootstrap(lin,F);
+  const out=T.decrypt(r.out), y=out/40;
+  const noisy=T.lin([[2,T.encrypt(q[0],2**20)],[-1,T.encrypt(q[1],2**20)]],20), rn=T.bootstrap(noisy,F);
+  const phaseAfter=r.trace.map(t=>Math.round(TFHE.cen(t.acc.B[0]-0)/D));      // coefficient 0 of B (A·S part ignored for display)
+  const accMsg=r.trace.map(t=>{ const ph=T.glwePhase(t.acc)[0]; return Math.round(TFHE.cen(ph)/D); });
+  R={x,q,m,inRange,zq,nn,c1,c2,c2x,cdiff,lin,r,out,y,noisy,rn,accMsg,phaseAfter,
+     e1:T.err(T.phase(c1),q[0]), e2:T.err(T.phase(c2),q[1]), eLin:T.err(T.phase(lin),m), eBig:T.err(T.phaseBig(r.big),F(m)), eOut:T.err(T.phase(r.out),F(m)),
+     eNoisyIn:T.err(T.phase(noisy),m), eNoisyOut:T.err(T.phase(rn.out),F(m)), noisyOut:T.decrypt(rn.out),
+     sizes:T.sizes(), s:T.K.s.slice(), S:T.K.S.slice()};
+  return R;
+}
+
+/* ---------- reusable drawings ---------- */
+function torus(cx,cy,r,o={}){                       // 64 message sectors of the torus
+  let g=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="currentColor" stroke-opacity=".35" stroke-width="2"/>`;
+  g+=`<path d="M${cx},${cy-r-14} A${r+14},${r+14} 0 0 1 ${cx},${cy+r+14}" fill="none" stroke="var(--client)" stroke-opacity=".35" stroke-width="6"/>`;
+  for(let k=0;k<2*P;k++){ const [x1,y1]=pt(cx,cy,r-4,k,2*P), [x2,y2]=pt(cx,cy,r+(k%8?4:8),k,2*P); g+=`<line x1="${P2(x1)}" y1="${P2(y1)}" x2="${P2(x2)}" y2="${P2(y2)}" stroke="currentColor" stroke-opacity="${k%8?.3:.7}"/>`; }
+  [0,8,16,24,32,40,48,56].forEach(k=>{ const [x,y]=pt(cx,cy,r+24,k,2*P); g+=`<text x="${P2(x)}" y="${P2(y+4)}" text-anchor="middle" font-size="11" fill="currentColor" class="c-muted mono">${k}</text>`; });
+  if(o.label!==false) g+=`<g class="c-client"><text x="${cx-r-24}" y="${cy-r-6}" font-size="11.5" fill="currentColor">blue arc = messages 0–31</text></g>`;
+  return g;
+}
+const dot=(cx,cy,r,mm,cls,label,cl="",lr=18)=>{ const [x,y]=pt(cx,cy,r,mm,2*P), [lx,ly]=pt(cx,cy,r-lr-10,mm,2*P);
+  return `<g class="${cls} ${cl}"><circle cx="${P2(x)}" cy="${P2(y)}" r="7" fill="currentColor"/><text x="${P2(lx)}" y="${P2(ly+4)}" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">${label}</text></g>`; };
+const arc=(cx,cy,r,a,b,M,cls,mark="ahs")=>{ const [x1,y1]=pt(cx,cy,r,a,M), [x2,y2]=pt(cx,cy,r,b,M); const d=((b-a)%M+M)%M, cw=d<=M/2; const large=0;
+  return `<g class="${cls}"><path class="arcp" pathLength="1" stroke-dasharray="1" d="M${P2(x1)},${P2(y1)} A${r},${r} 0 ${large} ${cw?1:0} ${P2(x2)},${P2(y2)}" fill="none" stroke="currentColor" stroke-width="2.5" marker-end="url(#${mark})"/></g>`; };
+function bars(x,y,w,h,vals,cls,n){ const bw=w/vals.length; return vals.map((v,i)=>`<rect class="bar" style="transform-box:fill-box;transform-origin:bottom" x="${P2(x+i*bw+bw*0.12)}" y="${P2(y+h-Math.max(1.5,v*h))}" width="${P2(bw*0.76)}" height="${P2(Math.max(1.5,v*h))}" fill="currentColor" fill-opacity=".6"/>`).join(""); }
+function lutRing(cx,cy,r0,r1,rotDeg,o={}){            // test polynomial v and its negacyclic copy −v around a circle
+  let g=`<g class="ring" style="transform-box:view-box;transform-origin:${cx}px ${cy}px;transform:rotate(${rotDeg}deg)">`;
+  g+=`<circle cx="${cx}" cy="${cy}" r="${r0}" fill="none" stroke="currentColor" stroke-opacity=".25"/>`;
+  for(let j=0;j<TWO_N;j+=2){ const val=F(Math.round((j%N)/(N/P))%P), neg=j>=N, h=(r1-r0)*val/15; if(!val){ continue; }
+    const [x1,y1]=pt(cx,cy,r0,j,TWO_N), [x2,y2]=pt(cx,cy,r0+h,j,TWO_N);
+    g+=`<line x1="${P2(x1)}" y1="${P2(y1)}" x2="${P2(x2)}" y2="${P2(y2)}" style="stroke:var(${neg?"--warn":"--server"})" stroke-width="2.2"/>`; }
+  for(let mm=0;mm<P;mm+=4){ const j=mm*N/P, [x,y]=pt(cx,cy,r0-12,j,TWO_N); g+=`<text style="transform-box:fill-box;transform-origin:center;transform:rotate(${-rotDeg}deg)" x="${P2(x)}" y="${P2(y+4)}" text-anchor="middle" font-size="10" fill="currentColor" class="c-muted mono">${mm}</text>`; }
+  const [nx,ny]=pt(cx,cy,r0-34,N+N/2,TWO_N); g+=`<text style="transform-box:fill-box;transform-origin:center;transform:rotate(${-rotDeg}deg)" x="${P2(nx)}" y="${P2(ny+4)}" text-anchor="middle" font-size="11" fill="currentColor" class="c-warn">−v</text>`;
+  const [px,py]=pt(cx,cy,r0-34,N/2,TWO_N); g+=`<text style="transform-box:fill-box;transform-origin:center;transform:rotate(${-rotDeg}deg)" x="${P2(px)}" y="${P2(py+4)}" text-anchor="middle" font-size="11" fill="currentColor" class="c-server">v</text>`;
+  return g+`</g>`;
+}
+const pointer=(cx,cy,r)=>`<g class="c-ok"><path d="M${cx-9},${cy-r-26} L${cx+9},${cy-r-26} L${cx},${cy-r-10} z" fill="currentColor"/><text x="${cx}" y="${cy-r-32}" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">read coefficient 0</text></g>`;
+const degOf=e=>e*360/TWO_N;
+
+/* ---------- steps ---------- */
+const steps=[
+{ key:"Example", who:"both", whoT:"the task", at:0, budget:"0 used", scale:"integers", err:()=>0,
+  title:"The same neuron, in small integers",
+  cap:()=>`TFHE works on small integers, so we scale: x × 10, w × 4, b × 40. Then <b>40·z = ${2*R.q[0]-R.q[1]+4}</b>, and ReLU becomes a lookup table.`,
+  scene(){ const z40=2*R.q[0]-R.q[1]+4;
+    const row=(y,lab,vals,cls)=>lbl(40,y+30,lab,'font-weight="700"')+vals.map((v,i)=>tile(230+i*120,y,108,46,v,cls,"q")).join("");
+    let g=row(30,"x × 10",[R.q[0],R.q[1]],"c-client")+row(90,"w × 4",["2","−1"],"c-server")+row(150,"b × 40",["4"],"c-server");
+    g+=`<g class="c-muted"><line x1="40" y1="216" x2="460" y2="216" stroke="currentColor"/></g>`;
+    g+=lbl(40,250,"40·z = 2·"+R.q[0]+" − "+R.q[1]+" + 4",'class="mono"')+`<g class="zt">${tile(330,226,108,46,z40,"c-ok")}</g>`;
+    g+=lbl(40,310,"+ offset 16 so negatives stay positive","class=\"c-muted\"")+`<g class="zt">${tile(330,286,108,46,R.m,"c-ok")}</g>`;
+    g+=small(500,44,"LOOKUP TABLE  f(m) = max(0, m − 16)");
+    for(let mm=0;mm<P;mm++){ const x=500+(mm%16)*17, y=56+Math.floor(mm/16)*54, v=F(mm);
+      g+=`<g class="${mm===R.m?"c-ok":"c-server"} lc"><rect x="${x}" y="${y}" width="15" height="22" rx="2" fill="currentColor" fill-opacity="${mm===R.m?.5:.12}" stroke="currentColor" stroke-opacity=".6"/><text x="${x+7.5}" y="${y+15}" text-anchor="middle" font-size="9" fill="currentColor" class="mono">${mm}</text>
+      <text x="${x+7.5}" y="${y+40}" text-anchor="middle" font-size="9" fill="currentColor" class="mono">${v}</text></g>`; }
+    g+=small(500,180,"top: input m · bottom: output f(m)")+small(500,198,"m = "+R.m+" → f = "+F(R.m)+" → y = "+F(R.m)+" / 40 = "+f(F(R.m)/40));
+    if(!R.inRange) g+=`<text x="500" y="230" font-size="13" fill="currentColor" class="c-warn">m is outside 0–31: this input does not fit the toy table</text>`;
+    g+=lbl(500,270,"Two inputs → two ciphertexts.","font-weight=\"700\"")+small(500,290,"TFHE packs one number per ciphertext;")+small(500,306,"CKKS packed both into one.");
+    return svg(340,g,"The neuron scaled to integers, the offset message m, and the 32-entry lookup table for ReLU."); },
+  play(){ pop(".q",0,90); pop(".zt",700,250); LS.A(".lc",[{opacity:0},{opacity:1}],{t:300,s:18,d:300}); },
+  math:()=>`<div class="formula">40·z = 2·${R.q[0]} + (−1)·${R.q[1]} + 4 = ${2*R.q[0]-R.q[1]+4}      m = 40·z + 16 = ${R.m}</div><div class="formula">f(m) = max(0, m − 16) = ${F(R.m)}   ⇒   y = ${F(R.m)} / 40 = ${f(F(R.m)/40)}</div><p>Plain value for comparison: z = ${f(R.nn.z)}, ReLU(z) = ${f(R.nn.relu)}. Rounding x to one decimal is the only approximation in this lesson.</p>`,
+  explain:()=>`<p>TFHE encrypts small integers, typically 1 to 8 bits per ciphertext. So the real-valued neuron is first <b>quantized</b>: x is multiplied by 10, w by 4 and b by 40, and every product becomes an integer. The neuron's sum then comes out as 40·z = 14.</p>
+  <p>The non-linear step is where TFHE shines. Any function of a small integer can be written as a <b>table</b>. Here f(m) = max(0, m − 16) is ReLU after adding an offset of 16, which keeps negative values on the positive side of the table.</p>
+  <p>The price is packing. Each ciphertext holds one number, so x₁ and x₂ become two separate ciphertexts. CKKS put both into one polynomial and processed them together.</p>`
+},
+{ key:"Keys", who:"client", whoT:"client", at:()=>0.5, budget:"0 used", scale:"Δ = 2²⁶", err:()=>0,
+  title:"Make keys",
+  cap:()=>`A 4-bit LWE secret s, a 256-bit ring secret S, and two public keys: the bootstrapping key (one GGSW per bit of s) and the key-switching key.`,
+  scene(){ let g=lbl(40,40,"LWE SECRET  s","class=\"c-client\" font-weight=\"700\"")+small(40,58,"n = 4 bits (real TFHE: n ≈ 630–900)");
+    g+=R.s.map((b,i)=>tile(40+i*56,70,48,46,b,"c-client","kb")).join("");
+    g+=lbl(40,160,"RING SECRET  S","class=\"c-client\" font-weight=\"700\"")+small(40,178,"N = 256 binary coefficients");
+    for(let j=0;j<N;j++){ const x=40+(j%64)*4.4, y=188+Math.floor(j/64)*9; g+=`<rect class="sb" x="${P2(x)}" y="${y}" width="3.4" height="7" style="fill:var(--client)" fill-opacity="${R.S[j]?0.85:0.15}"/>`; }
+    g+=`<line x1="345" y1="30" x2="345" y2="300" stroke="currentColor" stroke-dasharray="4 6" opacity=".5"/>`+small(352,296,"network");
+    const key=(y,name,sub,size)=>`<g class="c-server keyg"><rect x="380" y="${y}" width="390" height="70" rx="8" fill="currentColor" fill-opacity=".08" stroke="currentColor" stroke-width="2"/>${LS.keyIcon(408,y+35)}<text x="452" y="${y+28}" font-size="14" font-weight="700" fill="currentColor">${name}</text><text x="452" y="${y+47}" font-size="12" fill="currentColor" class="c-muted">${sub}</text><text x="452" y="${y+63}" font-size="12" fill="currentColor" class="mono">${size}</text></g>`;
+    g+=key(40,"bootstrapping key","GGSW(s₁) … GGSW(s₄) under S",`toy: ${(R.sizes.bskBits/8/1024).toFixed(0)} KiB`);
+    g+=key(130,"key-switching key","LWE encryptions of S under s",`toy: ${(R.sizes.kskBits/8/1024).toFixed(0)} KiB`);
+    g+=`<g class="c-muted">${["M262,93 C320,93 330,75 372,75","M328,206 C345,206 350,165 372,165"].map(d=>`<path class="flow" pathLength="1" stroke-dasharray="1" d="${d}" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#ahm)"/>`).join("")}</g>`;
+    g+=small(380,240,"Real TFHE keys (cited, CGGI 2016): bootstrapping key ≈ 16 MB,")+small(380,256,"down from ≈ 1 GB for FHEW.");
+    return svg(310,g,"The four-bit LWE secret and the 256-bit ring secret stay with the client; the bootstrapping and key-switching keys go to the server."); },
+  play(){ LS.A(".kb",[{opacity:0,transform:"scaleY(0)"},{opacity:1,transform:"scaleY(1)"}],{s:110,d:500}); LS.A(".sb",[{opacity:0},{opacity:1}],{t:400,s:3,d:200}); draw(".flow",900,600); slide(".keyg",-100,0,1200,200); },
+  math:()=>`<div class="formula">s = (${R.s.join(", ")})      S(X) has ${R.S.filter(v=>v).length} of ${N} coefficients equal to 1</div><div class="formula">BSK_i = GGSW_S(s_i)  = 2·ℓ = 6 GLWE rows,  ℓ = 3 levels of base 2⁸</div><div class="formula">KSK_{j,l} = LWE_s( S_j · 2^(32−6l) ),  j &lt; 256, l = 1…4</div><p>Toy sizes: bootstrapping key ${(R.sizes.bskBits/8).toLocaleString()} bytes, key-switching key ${(R.sizes.kskBits/8).toLocaleString()} bytes, one LWE ciphertext ${R.sizes.lweBits/8} bytes.</p>`,
+  explain:()=>`<p>TFHE uses two secrets. The <b class="c-client">LWE secret s</b> encrypts the data. It is a short vector of bits, 4 here and several hundred in practice. The <b class="c-client">ring secret S</b> is a binary polynomial with N = 256 coefficients. It lives inside the bootstrapping machinery.</p>
+  <p>The <b>bootstrapping key</b> holds one GGSW ciphertext per bit of s, encrypted under S. GGSW is the ring version of GSW: a stack of ciphertexts that encrypt the same bit times powers of a base. That structure lets the server multiply a ciphertext by an encrypted bit with very little noise growth.</p>
+  <p>The <b>key-switching key</b> encrypts each coefficient of S under s. Bootstrapping ends with a ciphertext under S, and this key brings it back to s.</p>
+  <p>Compared with CKKS there is no relinearization or rotation key. TFHE never multiplies two data ciphertexts together. It only multiplies by encrypted key bits inside bootstrapping.</p>`
+},
+{ key:"Encrypt", who:"client", whoT:"client", at:0.5, budget:"0 used", scale:"Δ = 2²⁶", err:()=>R.e1/D,
+  title:"Encrypt one number as a point on a circle",
+  cap:()=>`An LWE ciphertext is 4 random numbers a and one number b. Their phase b − ⟨a, s⟩ is a point on a circle: the message ${R.q[0]} plus a tiny noise.`,
+  scene(){ const cx=200,cy=175,r=120; let g=torus(cx,cy,r);
+    g+=dot(cx,cy,r,R.q[0],"c-client","x₁","dt");
+    g+=small(cx-80,cy+4,"circle = numbers mod 2³²,")+small(cx-80,cy+20,"cut into 64 sectors of size Δ");
+    const fr=v=>v/Q;
+    g+=lbl(410,40,"CIPHERTEXT c₁ = (a, b)","font-weight=\"700\"");
+    g+=`<g class="c-client">${bars(410,52,180,70,R.c1.a.map(fr),"c-client")}${bars(610,52,40,70,[fr(R.c1.b)],"c-client")}</g>`;
+    g+=small(500,140,"a₁ … a₄  (uniform)",'text-anchor="middle"')+small(630,140,"b",'text-anchor="middle"');
+    g+=lbl(410,180,"phase = b − ⟨a, s⟩  =  m·Δ + e","class=\"mono\"");
+    g+=`<g class="dm">${tile(410,196,150,40,(T.phase(R.c1)/D).toFixed(4),"c-client","",13)}</g>`+small(580,221,"= "+R.q[0]+" + noise, in units of Δ");
+    g+=lbl(410,275,"noise e = "+LS.big(R.e1),"class=\"c-noise mono\"")+small(410,293,"≈ 2^"+lg(R.e1)+", which is "+(Math.abs(R.e1)/D*100).toFixed(3)+"% of one sector");
+    return svg(330,g,"The ciphertext's phase is a point on a circle divided into 64 message sectors; message 15 sits in its sector with a tiny noise."); },
+  play(){ LS.A(".bar",[{transform:"scaleY(.1)"},{transform:"scaleY(1.3)"},{transform:"scaleY(1)"}],{s:70,d:900}); pop(".dt",600); pop(".dm",1100); },
+  math:()=>`<div class="formula">a = (${R.c1.a.join(", ")})</div><div class="formula">b = ⟨a, s⟩ + m·Δ + e mod 2³² = ${R.c1.b}</div><div class="formula">b − ⟨a, s⟩ = ${T.phase(R.c1)} = ${R.q[0]}·2²⁶ + (${LS.big(R.e1)})</div><p>Second ciphertext c₂ for x₂ = ${R.q[1]}: noise ${LS.big(R.e2)}. Δ = 2³²/(2·32) = 2²⁶ leaves one spare <b>padding bit</b> above the 5-bit message.</p>`,
+  explain:()=>`<p>LWE encryption is a single line: pick random a, compute b = ⟨a, s⟩ + m·Δ + e, and send (a, b). Everything is an integer modulo 2³², and TFHE thinks of it as a point on a circle, the <b>torus</b>.</p>
+  <p>The circle is cut into 64 sectors of width Δ = 2²⁶. The message picks the sector and the noise moves the point a tiny bit inside it. Without s the point looks uniformly random. With s, subtracting ⟨a, s⟩ reveals it.</p>
+  <p>Only the right half of the circle, messages 0 to 31, is used. The left half is the <b>padding bit</b>, which bootstrapping needs to tell a message from its negative.</p>
+  <p>Compare with CKKS. There, the message sat in the high bits of a polynomial coefficient and the noise was part of the rounding error. Here the noise has its own budget inside each sector and never touches the result, as long as it stays below half a sector.</p>`
+},
+{ key:"Linear", who:"server", whoT:"server", at:1, budget:"0 used", scale:"Δ = 2²⁶", err:()=>R.eLin/D,
+  title:"Linear part: scale and add points",
+  cap:()=>`Multiplying an LWE ciphertext by an integer multiplies its point; adding ciphertexts adds points. 2·${R.q[0]} − ${R.q[1]} + 20 lands on m = ${R.m}.`,
+  scene(){ const cx=200,cy=175,r=120; const a=R.q[0], b=2*R.q[0], c=2*R.q[0]-R.q[1], d=R.m; const M=2*P, wrap=v=>((v%M)+M)%M;
+    let g=torus(cx,cy,r,{label:false});
+    const mid=(u,v)=>{ let dd=((v-u)%M+M)%M; if(dd>M/2) dd-=M; return u+dd/2; };
+    const num=(rr,u,v,k)=>{ const [x,y]=pt(cx,cy,rr,mid(u,v),M); return `<g class="c-server lin"><circle cx="${P2(x)}" cy="${P2(y)}" r="9" fill="var(--panel)" stroke="currentColor" stroke-width="1.5"/><text x="${P2(x)}" y="${P2(y+4)}" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor">${k}</text></g>`; };
+    g+=arc(cx,cy,r-22,wrap(a),wrap(b),M,"c-server lin")+arc(cx,cy,r-46,wrap(b),wrap(c),M,"c-server lin")+arc(cx,cy,r-70,wrap(c),wrap(d),M,"c-server lin");
+    g+=num(r-22,wrap(a),wrap(b),1)+num(r-46,wrap(b),wrap(c),2)+num(r-70,wrap(c),wrap(d),3);
+    g+=dot(cx,cy,r,wrap(a),"c-client","x₁","p1",-30)+dot(cx,cy,r,wrap(c),"c-muted","","p2",-30)+dot(cx,cy,r,wrap(d),"c-ok","m","p3",-30);
+    const rows=[["2 · c₁",`${a} → ${b}`],["− c₂",`${b} → ${c}`],["+ 20·Δ  (bias + offset)",`${c} → ${d}`]];
+    g+=lbl(410,40,"ONE CIPHERTEXT PER VALUE","font-weight=\"700\"");
+    rows.forEach((rw,i)=>{ const y=80+i*48; g+=`<g class="rw"><g class="c-server"><circle cx="420" cy="${y-5}" r="9" fill="none" stroke="currentColor" stroke-width="1.5"/><text x="420" y="${y-1}" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor">${i+1}</text></g>${lbl(438,y,rw[0],'class="mono"')}${lbl(680,y,rw[1],'class="mono c-server"')}</g>`; });
+    g+=lbl(410,240,"noise after the linear part","class=\"c-noise\"")+lbl(410,260,"≈ 2^"+lg(R.eLin)+"   (was 2^"+lg(R.e1)+")","class=\"mono c-noise\"");
+    g+=small(410,290,"Cost: n + 1 = 5 integer multiply-adds per term.")+small(410,306,"No keys needed.");
+    return svg(330,g,"On the circle, doubling moves x₁ from 15 to 30, subtracting x₂ moves to 10, adding the bias and offset lands on 30."); },
+  play(){ pop(".p1",0); draw(".arcp",400,700); pop(".p2",1100); pop(".p3",1900); LS.A(".rw",[{opacity:0,transform:"translateX(-12px)"},{opacity:1,transform:"none"}],{t:300,s:500,d:500}); },
+  math:()=>`<div class="formula">c = 2·c₁ − c₂ + (0, 20·Δ)  ⇒  a = 2a₁ − a₂,  b = 2b₁ − b₂ + 20·2²⁶</div><div class="formula">decrypt(c) = ${T.decrypt(R.lin)}    noise ${LS.big(R.eLin)} ≈ 2^${lg(R.eLin)}</div><p>The weights must be small integers. Multiplying by k multiplies the noise by k, so large weights would push the point out of its sector.</p>`,
+  explain:()=>`<p>LWE is <b>linearly homomorphic</b>. Multiplying (a, b) by an integer k multiplies the phase by k, and adding two ciphertexts adds their phases. On the circle that means stretching and adding angles.</p>
+  <p>The server computes 2·c₁ − c₂ and adds the constant 20·Δ to b: 4 for the bias and 16 for the offset. The point lands in sector 30. No key was used, and each step costs only n + 1 integer operations.</p>
+  <p>What TFHE cannot do here is multiply two ciphertexts, or treat many numbers at once. An LLM layer with thousands of inputs needs thousands of separate LWE ciphertexts, each processed on its own. That is why plain TFHE is slow for the big matrix products that CKKS handles well.</p>
+  <p>Noise grew with each operation, by about the size of the weights. On its own it would keep growing. The next steps reset it.</p>`
+},
+{ key:"Mod switch", who:"server", whoT:"server", at:1, budget:"1 started", scale:"2N = 512", err:()=>R.eLin/D,
+  title:"Modulus switch: shrink the circle to 512 steps",
+  cap:()=>`Bootstrapping starts by rounding a and b from 2³² down to 2N = 512 positions. The phase becomes φ̄ = ${R.r.phi2N}, which is message ${R.m} × 8 plus a little rounding error.`,
+  scene(){ const cx=200,cy=175,r=120; let g=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="currentColor" stroke-opacity=".35" stroke-width="2"/>`;
+    for(let k=0;k<TWO_N;k+=8){ const [x1,y1]=pt(cx,cy,r-3,k,TWO_N),[x2,y2]=pt(cx,cy,r+(k%64?3:8),k,TWO_N); g+=`<line x1="${P2(x1)}" y1="${P2(y1)}" x2="${P2(x2)}" y2="${P2(y2)}" stroke="currentColor" stroke-opacity="${k%64?.25:.7}"/>`; }
+    [0,128,384].forEach(k=>{ const [x,y]=pt(cx,cy,r+24,k,TWO_N); g+=`<text x="${P2(x)}" y="${P2(y+4)}" text-anchor="middle" font-size="11" fill="currentColor" class="c-muted mono">${k}</text>`; });
+    const [wx1,wy1]=pt(cx,cy,r,R.m*8-4,TWO_N),[wx2,wy2]=pt(cx,cy,r,R.m*8+4,TWO_N);
+    const [ox1,oy1]=pt(cx,cy,r+14,R.m*8-4,TWO_N),[ox2,oy2]=pt(cx,cy,r+14,R.m*8+4,TWO_N),[tx,ty]=pt(cx,cy,r+30,R.m*8,TWO_N);
+    g+=`<g class="c-ok win"><path d="M${P2(ox1)},${P2(oy1)} A${r+14},${r+14} 0 0 1 ${P2(ox2)},${P2(oy2)}" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round"/><text x="${P2(tx+38)}" y="${P2(ty+4)}" font-size="11.5" fill="currentColor">window</text></g>`;
+    const [px,py]=pt(cx,cy,r,R.r.phi2N,TWO_N), [lx,ly]=pt(cx,cy,r-34,R.r.phi2N,TWO_N);
+    g+=`<g class="c-ok ph"><circle cx="${P2(px)}" cy="${P2(py)}" r="6" fill="currentColor"/><text x="${P2(lx)}" y="${P2(ly+4)}" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor">φ̄ = ${R.r.phi2N}</text></g>`;
+    g+=small(cx-72,cy+4,"window of message "+R.m+":")+small(cx-72,cy+20,"positions "+(R.m*8-4)+" to "+(R.m*8+3));
+    g+=lbl(410,40,"ROUND EVERY NUMBER TO 9 BITS","font-weight=\"700\"");
+    const rows=[["a₁",R.lin.a[0],R.r.cs.a[0]],["a₂",R.lin.a[1],R.r.cs.a[1]],["a₃",R.lin.a[2],R.r.cs.a[2]],["a₄",R.lin.a[3],R.r.cs.a[3]],["b",R.lin.b,R.r.cs.b]];
+    rows.forEach((rw,i)=>{ const y=72+i*34; g+=`<g class="rw">${lbl(410,y,rw[0],'class="mono"')}${lbl(450,y,String(rw[1]),'class="mono c-muted"')}${LS.arrow(570,y-4,612,y-4,"ahs","c-server")}${lbl(622,y,String(rw[2]),'class="mono c-server" font-weight="700"')}</g>`; });
+    g+=small(410,256,"φ̄ = b̄ − Σ āᵢ·sᵢ mod 512 = "+R.r.phi2N)+small(410,274,"ideal: "+R.m+" × 8 = "+(R.m*8)+", rounding error "+(R.r.phi2N-R.m*8));
+    g+=small(410,292,"Error must stay below 4 positions, half a window.");
+    return svg(330,g,"After rounding to 512 positions the phase lands inside the eight-position window that belongs to message 30."); },
+  play(){ LS.A(".rw",[{opacity:0},{opacity:1}],{s:180,d:400}); blink(".win",900); pop(".ph",1300); },
+  math:()=>`<div class="formula">āᵢ = round(aᵢ · 512 / 2³²),   b̄ = round(b · 512 / 2³²)</div><div class="formula">φ̄ = ${R.r.cs.b} − (${R.r.cs.a.map((v,i)=>v+"·"+R.s[i]).join(" + ")}) mod 512 = ${R.r.phi2N}</div><p>Each message owns 2N/(2p) = 512/64 = 8 positions. Rounding n + 1 = 5 numbers adds at most 2.5 positions of error, so the toy uses n = 4. Real parameters balance n and N the same way.</p>`,
+  explain:()=>`<p>Bootstrapping must evaluate the decryption formula b − ⟨a, s⟩ <i>homomorphically</i>, using the encrypted bits of s. To make that cheap, the numbers are first rounded from 32 bits down to 9 bits, so the phase becomes a position on a circle of 2N = 512 steps.</p>
+  <p>Rounding adds error. Each message owns a <b>window of 8 positions</b>, and the rounding error must stay below 4 to keep the right window. That is why TFHE parameters link the LWE dimension n to the ring size N.</p>
+  <p>The rounded ciphertext is still encrypted. The server does not know φ̄. Only the client could compute it, and the next step lets the server act on it blindly.</p>`
+},
+{ key:"Test polynomial", who:"server", whoT:"server", at:1, budget:"1 started", scale:"2N = 512", err:()=>R.eLin/D,
+  title:"Write the lookup table into a polynomial",
+  cap:()=>`The table f is copied into a polynomial v with 256 coefficients: each message's value repeated over its 8-position window. Its negative copy −v fills the other half of the circle.`,
+  scene(){ const cx=210,cy=212,r0=92,r1=150; let g=lutRing(cx,cy,r0,r1,0)+pointer(cx,cy,r1);
+    g+=lbl(430,50,"TEST POLYNOMIAL  v(X) = Σ vⱼ Xʲ","font-weight=\"700\"")+small(430,70,"vⱼ = f(round(j/8)) · Δ")+small(430,86,"multiplying by X⁻ᵏ turns the ring by k positions");
+    for(let mm=0;mm<P;mm++){ const x=430+(mm%16)*21, y=104+Math.floor(mm/16)*40, v=F(mm);
+      g+=`<g class="c-server lc"><rect x="${x}" y="${y+18-v*1.2}" width="16" height="${Math.max(1,v*1.2)}" fill="currentColor" fill-opacity=".7"/><text x="${x+8}" y="${y+32}" text-anchor="middle" font-size="9" fill="currentColor" class="mono c-muted">${mm}</text></g>`; }
+    g+=small(430,200,"bar height = f(m) for m = 0 … 31")+small(430,232,"X²⁵⁶ = −1 makes the second half of the circle")+small(430,248,"the negative copy −v (red). The padding bit keeps")+small(430,264,"real messages on the purple half.");
+    return svg(375,g,"The lookup table as a ring of 512 positions: purple bars are f values, red bars are the negated copy, and a pointer marks coefficient zero."); },
+  play(){ LS.A(".ring",[{opacity:0,transform:"rotate(-90deg)"},{opacity:1,transform:"rotate(0deg)"}],{d:1200}); LS.A(".lc",[{opacity:0},{opacity:1}],{t:500,s:25,d:300}); },
+  math:()=>`<div class="formula">v(X) = Σⱼ f(⌊(j + 4)/8⌋ mod 32) · Δ · Xʲ,   j = 0 … 255</div><div class="formula">X^(−φ̄) · v(X)  has constant coefficient  ${R.r.phi2N<N?"v_φ̄":"−v_(φ̄−256)"} = f(${R.m}) · Δ = ${F(R.m)}·Δ</div><p>Any function of a 5-bit input can be written into v. Changing ReLU to GELU, sign or a 5-bit square is just a different table, and costs nothing extra.</p>`,
+  explain:()=>`<p>Here is the key trick of TFHE, called <b>programmable bootstrapping</b>. The server writes the function it wants, ReLU, into a plaintext polynomial v. Coefficient j holds the value of f for the message that owns position j.</p>
+  <p>In the ring Z[X]/(X²⁵⁶ + 1), multiplying by X⁻ᵏ shifts every coefficient down by k positions. Coefficients that fall off the end come back negated, because X²⁵⁶ = −1. Think of v as a ring of 512 positions where the second half is −v.</p>
+  <p>If the server could multiply v by X^(−φ̄), coefficient 0 would land on exactly f(m)·Δ. It cannot, because φ̄ is secret. The next step does it with the encrypted bits of s.</p>`
+},
+{ key:"Blind rotation", who:"server", whoT:"server", at:1, budget:"1 running", scale:"GLWE, N = 256", err:()=>R.eLin/D,
+  title:"Blind rotation: turn the ring by the secret phase",
+  cap:()=>`Start by turning by −b̄ = −${R.r.cs.b}. Then, for each key bit, a CMux turns the ring by āᵢ when sᵢ = 1 and does nothing when sᵢ = 0. The server never learns which.`,
+  scene(){ const cx=200,cy=210,r0=86,r1=140; const tr=R.r.trace; let e=-R.r.cs.b, stages=[e];
+    for(let i=0;i<T.n;i++){ e+=R.r.cs.a[i]*R.s[i]; stages.push(e); }
+    let g=lutRing(cx,cy,r0,r1,degOf(stages[stages.length-1]))+pointer(cx,cy,r1);
+    g+=`<g class="c-ok"><circle cx="${cx}" cy="${cy}" r="34" fill="var(--panel)" stroke="currentColor" stroke-width="2"/><text x="${cx}" y="${cy-2}" text-anchor="middle" font-size="11" fill="currentColor">coef 0</text><text x="${cx}" y="${cy+16}" text-anchor="middle" font-size="16" font-weight="700" fill="currentColor" class="mono">${R.accMsg[R.accMsg.length-1]}</text></g>`;
+    g+=lbl(410,40,"CMUX CHAIN (one per key bit)","font-weight=\"700\"");
+    g+=`<g class="cm">${lbl(410,72,"start: × X^(−b̄)",'class="mono"')}${lbl(600,72,"turn −"+R.r.cs.b,'class="mono c-server"')}${lbl(720,72,"c₀ = "+R.accMsg[0],'class="mono c-ok"')}</g>`;
+    for(let i=0;i<T.n;i++){ const y=110+i*40, on=R.s[i];
+      g+=`<g class="cm">${tile(410,y-22,44,30,"s"+sub(i+1),"c-client","",12)}${lbl(466,y-2,`ā${sub(i+1)} = ${R.r.cs.a[i]}`,'class="mono"')}${lbl(600,y-2,on?"turn +"+R.r.cs.a[i]:"skip",`class="mono ${on?"c-server":"c-muted"}"`)}${lbl(720,y-2,"c₀ = "+R.accMsg[i+1],'class="mono c-ok"')}</g>`; }
+    g+=small(410,290,"total turn = −φ̄ = −"+R.r.phi2N+" positions; coefficient 0 now holds f("+R.m+")·Δ")+small(410,306,"Each CMux: ACC + ExtProd(GGSW(sᵢ), X^āᵢ·ACC − ACC)");
+    g+=small(410,330,"Toy run: "+R.r.ms.toFixed(1)+" ms for the whole bootstrap in this browser.");
+    return svg(372,g,"The lookup ring turns by minus b-bar, then by each a-bar for key bits equal to one, so coefficient zero lands on f of the message."); },
+  play(){ if(LS.reduce) return; let e=-R.r.cs.b; const kf=[{transform:"rotate(0deg)"},{transform:`rotate(${degOf(e)}deg)`}];
+    for(let i=0;i<T.n;i++){ e+=R.r.cs.a[i]*R.s[i]; kf.push({transform:`rotate(${degOf(e)}deg)`}); }
+    LS.A(".ring",kf,{d:900*kf.length}); LS.A(".cm",[{opacity:.15},{opacity:1}],{s:900,d:400}); },
+  math:()=>`<div class="formula">ACC₀ = (0, X^(−b̄)·v)      ACCᵢ = ACCᵢ₋₁ + GGSW(sᵢ) ⊡ (X^(āᵢ)·ACCᵢ₋₁ − ACCᵢ₋₁)</div><div class="formula">final ACC encrypts X^(−φ̄)·v, constant coefficient = ${R.accMsg[R.accMsg.length-1]}·Δ</div>
+    <p><b>External product ⊡ (GSW idea).</b> A GLWE ciphertext (A, B) is split into signed base-2⁸ digits, 3 per coefficient, giving 6 small polynomials. Each digit polynomial multiplies one row of the GGSW stack, and the results are summed. Because the digits are small (|d| ≤ 128), the noise grows only additively, not multiplicatively. This is the GSW approximate-eigenvector trick (Gentry–Sahai–Waters 2013), applied to polynomials.</p>
+    <p>Intermediate constant coefficients (in units of Δ): ${R.accMsg.join(" → ")}.</p>`,
+  explain:()=>`<p><b>Blind rotation</b> evaluates X^(−φ̄)·v without knowing φ̄. Because φ̄ = b̄ − Σ āᵢsᵢ, the rotation splits into a public part, X^(−b̄), and one secret part per key bit, X^(āᵢsᵢ).</p>
+  <p>Each secret part is a <b>CMux</b>, a homomorphic "if". If sᵢ = 1, rotate by āᵢ, otherwise keep the accumulator. It is computed as ACC + sᵢ·(X^āᵢ·ACC − ACC), where the multiplication by the encrypted bit sᵢ uses the GGSW bootstrapping key and the <b>external product</b>.</p>
+  <p>The external product is GSW's idea. Break the ciphertext into small digits, multiply each digit by a row of the GGSW stack, and add. Multiplying by small digits keeps the noise growth additive, so a chain of n CMuxes adds n small noises instead of multiplying them.</p>
+  <p>After all n bits, coefficient 0 of the accumulator encrypts f(m)·Δ. The ring in the figure shows exactly that rotation. It runs in milliseconds in the toy, and in about 10 ms for real 128-bit parameters on one CPU core.</p>`
+},
+{ key:"Extract", who:"server", whoT:"server", at:1, budget:"1 running", scale:"LWE, n = 256", err:()=>R.eBig/D,
+  title:"Sample extract: take coefficient 0",
+  cap:()=>`The accumulator is a ring ciphertext (A, B) under S. Reading its constant coefficient gives an ordinary LWE ciphertext of dimension 256 that encrypts f(m) = ${F(R.m)}.`,
+  scene(){ const fr=v=>v/Q; let g=lbl(40,40,"ACCUMULATOR (A, B): two polynomials, 256 coefficients each","font-weight=\"700\"");
+    g+=`<g class="c-server">${bars(40,56,720,50,R.r.acc.A.map(fr))}</g>`+small(40,124,"A(X)");
+    g+=`<g class="c-server">${bars(40,136,720,50,R.r.acc.B.map(fr))}</g>`+small(40,204,"B(X)");
+    g+=`<g class="c-ok hi"><rect x="38" y="132" width="7" height="58" fill="none" stroke="currentColor" stroke-width="2"/></g>`;
+    g+=`<g class="c-ok"><path class="ex" pathLength="1" stroke-dasharray="1" d="M42,192 C42,232 150,222 150,252" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#ahk)"/></g>`;
+    g+=lbl(40,272,"LWE ciphertext under S:  a′ = (A₀, −A₂₅₅, −A₂₅₄, …, −A₁),  b′ = B₀","class=\"mono\"");
+    g+=lbl(40,302,"decrypts to "+(T.phaseBig(R.r.big)/D).toFixed(4)+" × Δ  →  "+F(R.m),"class=\"mono c-ok\"")+small(40,322,"noise ≈ 2^"+lg(R.eBig)+", independent of the noise that came in");
+    return svg(340,g,"The two accumulator polynomials look random; the constant coefficient, rearranged, forms an LWE ciphertext of dimension 256."); },
+  play(){ LS.A(".bar",[{transform:"scaleY(.1)"},{transform:"scaleY(1)"}],{s:2,d:500}); blink(".hi",700); draw(".ex",900,700); },
+  math:()=>`<div class="formula">B₀ − (A·S)₀ = B₀ − A₀S₀ + Σ_{j≥1} A_{256−j} S_j</div><div class="formula">so  a′ = (A₀, −A₂₅₅, …, −A₁),  b′ = B₀   decrypts under S to ${F(R.m)}·Δ + (${LS.big(R.eBig)})</div><p>Extraction is free: it only rearranges numbers and costs no noise.</p>`,
+  explain:()=>`<p>The accumulator holds a whole polynomial, but only its constant coefficient matters. Writing out the constant coefficient of B − A·S shows it is an LWE phase with vector (A₀, −A₂₅₅, …, −A₁) and key S. So the server can read off an ordinary LWE ciphertext. This <b>sample extraction</b> costs nothing.</p>
+  <p>The noise in this new ciphertext comes only from the bootstrapping key and the external products. It does not depend on how noisy the input was. That is the "refresh" in bootstrapping.</p>`
+},
+{ key:"Key switch", who:"server", whoT:"server", at:1, budget:"1 used", scale:"LWE, n = 4", err:()=>R.eOut/D,
+  title:"Key switch back to the small key",
+  cap:()=>`The result is under the 256-bit key S. The key-switching key converts it back to the 4-bit key s, so it looks like a fresh input again and can feed the next layer.`,
+  scene(){ const fr=v=>v/Q; let g=lbl(40,40,"BEFORE: dimension 256 under S","font-weight=\"700\"");
+    g+=`<g class="c-server">${bars(40,52,720,60,R.r.big.a.map(fr))}</g>`;
+    g+=`<g class="c-muted"><path d="M40,124 v8 h720 v-8 M400,132 V178" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#ahm)"/></g>`+small(412,160,"subtract digit × KSK for every coefficient (256 × 4 digits)");
+    g+=lbl(40,206,"AFTER: dimension 4 under s","font-weight=\"700\"");
+    g+=`<g class="c-client after">${bars(330,218,140,60,R.r.out.a.map(fr))}${bars(480,218,35,60,[fr(R.r.out.b)])}</g>`+small(400,296,"a₁ … a₄",'text-anchor="middle"')+small(497,296,"b",'text-anchor="middle"');
+    g+=lbl(560,250,"decrypts to "+T.decrypt(R.r.out),"class=\"mono c-ok\" font-weight=\"700\"")+lbl(560,272,"noise ≈ 2^"+lg(R.eOut),"class=\"mono c-noise\"");
+    return svg(320,g,"A long 256-entry ciphertext is converted by the key-switching key into a short four-entry ciphertext that decrypts to 14."); },
+  play(){ LS.A(".bar",[{transform:"scaleY(.1)"},{transform:"scaleY(1)"}],{s:2,d:500}); slide(".after",0,-40,700,0); },
+  math:()=>`<div class="formula">c_out = (0, b′) − Σⱼ Σₗ dⱼ,ₗ · KSKⱼ,ₗ,    a′ⱼ ≈ Σₗ dⱼ,ₗ · 2^(32−6l)</div><div class="formula">output: a = (${R.r.out.a.join(", ")}), b = ${R.r.out.b}</div><p>Noise before key switching ${LS.big(R.eBig)}, after ${LS.big(R.eOut)}. The KSK noise adds about 2^${lg(R.eOut)}.</p>`,
+  explain:()=>`<p>Sample extraction left the result under the ring key S, which is 256 bits long. The next bootstrapping expects the short key s. <b>Key switching</b> fixes that. Each coefficient a′ⱼ is split into small digits, and the matching encryptions of Sⱼ under s are subtracted.</p>
+  <p>Now the output is an ordinary 4-entry LWE ciphertext with small, fixed noise. It can enter another linear layer and another bootstrapping, as many times as the network needs. In TFHE every activation gets its own bootstrap, so depth is unlimited by design.</p>`
+},
+{ key:"Decrypt", who:"client", whoT:"client", at:0, budget:"1 used", scale:"exact", err:()=>R.inRange?0:"out of table",
+  title:"Decrypt: exact ReLU",
+  cap:()=>R.inRange?`The client decrypts <b>${R.out}</b>, so y = ${R.out}/40 = <b>${f(R.y)}</b>, exactly ReLU of the quantized neuron. CKKS gave 0.3262 for the same neuron.`:`m = ${R.m} does not fit the 32-entry table, so the result wraps. Pick inputs with 0 ≤ 2·x₁·10 − x₂·10 + 20 ≤ 31.`,
+  scene(){ const lgN=v=>Math.max(0,Math.min(1,(Math.log2(Math.max(Math.abs(v),1)))/26)); const W0=230,W1=740, bw=v=>(W1-W0)*lgN(v);
+    let g=`<g class="c-ok big"><text x="40" y="60" font-size="13" fill="currentColor" font-weight="700">TFHE GIVES</text><text x="40" y="108" font-size="44" font-family="var(--mono)" fill="currentColor">${f(R.y)}</text></g>`;
+    g+=`<g class="c-ok big"><text x="320" y="60" font-size="13" fill="currentColor" font-weight="700">TRUE ReLU(z)</text><text x="320" y="108" font-size="44" font-family="var(--mono)" fill="currentColor">${f(R.nn.relu)}</text></g>`;
+    g+=`<g class="c-server big"><text x="580" y="60" font-size="13" fill="currentColor" font-weight="700">CKKS (LESSON 1)</text><text x="580" y="108" font-size="44" font-family="var(--mono)" fill="currentColor">0.3262</text></g>`;
+    g+=lbl(40,165,"Bootstrapping resets noise (bits of noise, 0 to 26 = one sector)","font-weight=\"700\"");
+    [0,8,16,24].forEach(b=>{ const x=W0+(W1-W0)*b/26; g+=`<line x1="${P2(x)}" y1="180" x2="${P2(x)}" y2="320" stroke="currentColor" opacity=".15"/>`+small(x,336,"2"+sup(b),'text-anchor="middle"'); });
+    const rows=[["our input, before",R.eLin,"c-noise"],["our output, after",R.eOut,"c-ok"],["very noisy input",R.eNoisyIn,"c-warn"],["its output, after",R.eNoisyOut,"c-ok"]];
+    rows.forEach((rw,i)=>{ const y=186+i*34; g+=small(40,y+16,rw[0])+`<g class="${rw[2]}"><rect class="eb" x="${W0}" y="${y}" width="${P2(bw(rw[1]))}" height="24" rx="3" fill="currentColor"/><text x="${P2(W0+bw(rw[1])+8)}" y="${y+17}" font-size="12.5" fill="currentColor" class="mono">2^${lg(rw[1])}</text></g>`; });
+    return svg(350,g,"TFHE decrypts exactly 0.35, matching ReLU; bars show the output noise is the same small size whether the input noise was small or large."); },
+  play(){ pop(".big",0,250); growX(".eb",900,250); },
+  math:()=>`<div class="formula">decrypt(c_out) = round(phase / Δ) = ${R.out}      y = ${R.out} / 40 = ${f(R.y)}</div><p>The noisy-input demo encrypts the same values with noise σ ≈ 2²⁰ instead of 2¹⁷: the input noise reaches 2^${lg(R.eNoisyIn)}, the bootstrapped output decrypts to ${R.noisyOut} with noise 2^${lg(R.eNoisyOut)}.</p>`,
+  explain:()=>`<p>The client subtracts ⟨a, s⟩ from b, divides by Δ and rounds. The answer is the integer 14, so y = 14/40 = 0.35. That is <b>exactly</b> ReLU of the quantized neuron, with no polynomial approximation error at all.</p>
+  <p>The chart shows the other half of the story. The output noise is the same small size whether the input was clean or very noisy. Bootstrapping is not an emergency refresh, as it is in CKKS. It is the normal way every non-linear function is computed, and it cleans the noise as a side effect.</p>
+  <p>The trade-off is throughput. Each value needs its own bootstrap, and each bootstrap handles one 5- to 8-bit number. A Transformer layer with millions of activations needs millions of bootstraps, while CKKS processes thousands of values per operation.</p>`
+}];
+
+const cfg={ id:"tfhe", title:"TFHE Step by Step", compute, setup:()=>T.keygen(),
+  inputNote:"x is rounded to one decimal. Keep 0 ≤ 20·x₁ − 10·x₂ + 20 ≤ 31 so the message fits the table.",
+  status:{ budgetLabel:"Bootstraps", scaleLabel:"Encoding", errLabel:"Noise / Δ" },
+  footer:'Real toy TFHE in your browser: Q = 2³², LWE n = 4 (binary), ring N = 256, Δ = 2²⁶ (5-bit messages + padding bit), GGSW base 2⁸ × 3 levels, key switching base 2⁶ × 4 levels. Insecure sizes, real algebra. Schemes: Chillotti, Gama, Georgieva, Izabachène, <a href="https://eprint.iacr.org/2018/421">TFHE, ASIACRYPT 2016 / J. Cryptology 2020</a>; Gentry, Sahai, Waters, <a href="https://eprint.iacr.org/2013/340">GSW, CRYPTO 2013</a>.',
+  cardResult:()=>R.inRange?`${f(R.y)} for a true ${f(R.nn.relu)} (exact on the quantized neuron)`:`out of table range`,
+  steps };
+steps.push(LS.cardStep(cfg,{name:"TFHE",budget:"1 used",scale:"exact",err:()=>0,
+  extra:()=>`<div class="next"><div><b>Versus CKKS</b><br>Exact ReLU by table, but one value per ciphertext and one bootstrap per activation.</div><div><b>FHEW family</b><br>The same idea with other accumulators and very different key sizes.</div><div><b>Scheme switching</b><br>Use CKKS-style packing for the linear part, TFHE for ReLU.</div></div>`,
+  math:()=>`<p>Toy: Q = 2³², n = 4, N = 256, p = 32. Real TFHE (128-bit security) uses n ≈ 630–900, N = 1024–2048, and bootstraps in about 10 ms per value on one core (CGGI reported 13 ms).</p>`}));
+LS.start(cfg);
+})();
+</script>
+</body>
+</html>

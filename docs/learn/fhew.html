@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FHEW Step by Step</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lesson.css">
+<style>[hidden]{display:none!important}</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="lessons.js"></script>
+<script src="cards/fhew.js"></script>
+<script src="lesson.js"></script>
+<script src="engines/tfhe.js"></script>
+<script>
+(function(){
+"use strict";
+const {svg,tile,lbl,small,pop,fade,draw,slide,blink,growX,f,sub,sup}=LS;
+const T=TFHE.make(), D=T.D, N=T.N, TWO_N=2*N;
+const RELU=m=>Math.max(0,m-16), NAND=m=>m<2?1:0;
+const P2=v=>v.toFixed(1), KiB=bits=>bits/8/1024;
+const ggswBits=T.gl*2*2*N*32;                                   // one GGSW: 2ℓ rows × 2 polys × N × 32 bits
+let R, apReady=false;
+
+function compute(inp){
+  const x=[inp.x1,inp.x2], q=x.map(v=>Math.round(v*10)), m=2*q[0]-q[1]+20, inRange=m>=0&&m<T.p, nn=LS.neuron(x);
+  if(!apReady){ T.apKeys(8); apReady=true; }
+  const lin=T.lin([[2,T.encrypt(q[0])],[-1,T.encrypt(q[1])]],20);
+  const g=T.bootstrap(lin,RELU);                                  // GINX / CGGI accumulator (binary key, CMux)
+  const tp=T.testPoly(RELU), cs=T.modSwitch(lin);
+  const t0=Date.now(), ap=T.blindRotateAP(cs,tp.v), apOut=T.keySwitch(T.sampleExtract(ap.acc)), apMs=Date.now()-t0;
+  const digits=cs.a.map(a=>{ const d=[]; let v=a; for(let j=0;j<T.K.ap.digits;j++){ d.push(v%8); v=Math.floor(v/8); } return d; });
+  const gates=[[0,0],[0,1],[1,0],[1,1]].map(([a,b])=>{ const c=T.lin([[1,T.encrypt(a)],[1,T.encrypt(b)]],0); const r=T.bootstrap(c,NAND); return {a,b,sum:T.decrypt(c),out:T.decrypt(r.out),ms:r.ms}; });
+  R={x,q,m,inRange,nn,lin,g,ap,apOut,apMs,cs,digits,gates,ginx:T.decrypt(g.out),apv:T.decrypt(apOut),
+     eG:T.err(T.phase(g.out),RELU(m)), eA:T.err(T.phase(apOut),RELU(m)),
+     toy:{cggi:KiB(T.n*ggswBits), ap:KiB(T.n*T.K.ap.digits*T.K.ap.Br*ggswBits), ksk:KiB(T.sizes().kskBits)}};
+  return R;
+}
+const lg=v=>v?Math.log2(Math.abs(v)).toFixed(1):"0";
+
+const steps=[
+{ key:"Family", who:"both", whoT:"overview", at:0, budget:"—", scale:"LWE", err:()=>0,
+  title:"One idea, five accumulators",
+  cap:()=>`All of these schemes encrypt LWE bits or small integers and refresh them with blind rotation, as in Lesson 6. They differ in how the rotation is built, how big the keys are, and how many values one bootstrap serves.`,
+  scene(){ const items=[[2015,"FHEW","Ducas–Micciancio","AP accumulator, NAND gates, ~0.5 s"],[2016,"TFHE","Chillotti et al.","CMux (GINX) accumulator, 13 ms, 16 MB key"],[2022,"FINAL","Bonte et al.","NTRU + LWE, smaller keys than TFHE"],[2023,"LMKCDEY","Lee, Micciancio et al.","automorphisms: any secret, small keys"],[2026,"SIMD ALU","Gao–Zheng","many words, one bootstrap, O(1) amortized"]];
+    let g=`<line x1="60" y1="70" x2="760" y2="70" stroke="currentColor" stroke-opacity=".4" stroke-width="2"/>`;
+    items.forEach((it,i)=>{ const x=84+i*158; g+=`<g class="ev"><circle cx="${x}" cy="70" r="9" style="fill:var(--server)"/><text x="${x}" y="48" text-anchor="middle" font-size="12" fill="currentColor" class="mono c-muted">${it[0]}</text>
+      <text x="${x}" y="104" text-anchor="middle" font-size="15" font-weight="700" fill="currentColor" class="c-server">${it[1]}</text><text x="${x}" y="122" text-anchor="middle" font-size="11" fill="currentColor" class="c-muted">${it[2]}</text>`;
+      const words=it[3].split(", "); words.forEach((w,k)=>{ g+=`<text x="${x}" y="${146+k*16}" text-anchor="middle" font-size="11.5" fill="currentColor">${w}</text>`; }); g+=`</g>`; });
+    g+=lbl(60,240,"Same neuron as every lesson: 40·z = "+(R.m-16)+", m = "+R.m+", ReLU by lookup table","class=\"mono\"");
+    g+=small(60,262,"Figures under each name are cited from the papers' abstracts; the toy runs on this page use the Lesson 6 engine.");
+    return svg(285,g,"Timeline of FHEW-style schemes from 2015 to 2026 with what each one changed."); },
+  play(){ LS.A(".ev",[{opacity:0,transform:"translateY(14px)"},{opacity:1,transform:"none"}],{s:220,d:500}); },
+  math:()=>`<p>Cited figures: FHEW bootstraps "in just about half a second" (DM, EUROCRYPT 2015). TFHE reduced bootstrapping "from 690 ms to 13 ms single core, using 16 MB bootstrapping key instead of 1 GB" (CGGI, ASIACRYPT 2016). FINAL: "28% faster bootstrapping and 45% smaller bootstrapping and key-switching keys" than TFHE (ASIACRYPT 2022). LMKCDEY: supports arbitrary secret key distributions and decreases "the evaluation key size … by more than 30%" (EUROCRYPT 2023).</p>`,
+  explain:()=>`<p>FHEW (2015) was the first scheme to bootstrap a single encrypted bit in under a second. It did so by giving up on packing: one LWE ciphertext per bit, refreshed after every gate.</p>
+  <p>Everything that followed keeps that shape and improves the <b>accumulator</b>, the loop that rotates the test polynomial by the secret phase. TFHE replaced FHEW's accumulator with a CMux chain. FINAL moved to NTRU. LMKCDEY used ring automorphisms. The 2026 SIMD ALU work lets one bootstrap serve many machine words.</p>
+  <p>This lesson runs two of those accumulators for real on our neuron and explains the others with cited figures.</p>`
+},
+{ key:"NAND gate", who:"server", whoT:"server", at:1, budget:"4 used", scale:"bits", err:()=>0,
+  title:"FHEW's original job: one encrypted gate",
+  cap:()=>`FHEW computes NAND by adding two encrypted bits and bootstrapping with the table "1 if the sum is below 2". Four real bootstraps give the full truth table.`,
+  scene(){ let g=lbl(40,40,"ENCRYPTED NAND, computed on this page","font-weight=\"700\"");
+    const hd=["a","b","a + b (encrypted)","bootstrap with table","NAND(a, b)"]; const xs=[60,130,240,430,640];
+    hd.forEach((h,i)=>{ g+=small(xs[i],72,h,'text-anchor="middle"'); });
+    R.gates.forEach((r,i)=>{ const y=88+i*52; g+=`<g class="gr">${tile(xs[0]-22,y,44,40,r.a,"c-client")}${tile(xs[1]-22,y,44,40,r.b,"c-client")}${LS.arrow(160,y+20,186,y+20,"ahs","c-server")}${tile(xs[2]-50,y,100,40,r.sum,"c-server")}${LS.arrow(296,y+20,352,y+20,"ahs","c-server")}
+      ${tile(xs[3]-74,y,148,40,"m<2 ? 1 : 0","c-server","",12)}${LS.arrow(510,y+20,586,y+20,"ahk","c-ok")}${tile(xs[4]-30,y,60,40,r.out,r.out===1-(r.a&r.b)?"c-ok":"c-warn")}</g>`; });
+    g+=small(40,310,"Toy bootstrap time per gate: "+(R.gates.reduce((s,r)=>s+r.ms,0)/4).toFixed(1)+" ms. NAND is universal, so any circuit can be built from it.");
+    return svg(325,g,"Truth table of NAND computed on encrypted bits: each row adds two encrypted bits and bootstraps with a lookup table."); },
+  play(){ LS.A(".gr",[{opacity:0,transform:"translateX(-16px)"},{opacity:1,transform:"none"}],{s:300,d:500}); },
+  math:()=>`<div class="formula">c = c_a + c_b  ⇒ phase ≈ (a + b)·Δ,   bootstrap with v_j = NAND-table(round(j/8))·Δ</div><p>Results: ${R.gates.map(r=>`NAND(${r.a},${r.b}) = ${r.out}`).join(", ")}. FHEW's paper used a slightly different encoding (bits at q/4 with a fixed shift) but the same idea: a linear combination then a bootstrapped threshold.</p>`,
+  explain:()=>`<p>Gate bootstrapping is the classic FHEW mode. Bits are encrypted one per LWE ciphertext. A gate is a cheap linear combination, here a + b, followed by a bootstrap whose table maps the sum to the gate's output.</p>
+  <p>Because NAND is universal, any boolean circuit can be evaluated this way, with one bootstrap per gate. The noise never accumulates, since every gate output is fresh. The cost is that an 8-bit multiplication needs hundreds of gates, and each gate costs a full bootstrap.</p>
+  <p>For our neuron we skip bits and use the 5-bit lookup table directly, as TFHE does. That is called <b>functional</b> or <b>programmable</b> bootstrapping, and OpenFHE offers it for FHEW too.</p>`
+},
+{ key:"Two accumulators", who:"server", whoT:"server", at:1, budget:"1 each", scale:"2N = 512", err:()=>R.eG/D,
+  title:"Same ReLU, two accumulators",
+  cap:()=>`The neuron's ReLU, bootstrapped twice. The CMux accumulator (TFHE/GINX) needs one key per secret bit. The AP accumulator (FHEW) needs one key per digit value. Both return ${R.ginx}.`,
+  scene(){ const col=(x,title,sub1,keys,ops,res,cls)=>`<g class="colg"><rect x="${x}" y="30" width="340" height="250" rx="10" fill="currentColor" fill-opacity=".04" stroke="currentColor" stroke-opacity=".3"/>
+      <text x="${x+20}" y="60" font-size="15" font-weight="700" fill="currentColor" class="${cls}">${title}</text><text x="${x+20}" y="80" font-size="12" fill="currentColor" class="c-muted">${sub1}</text>
+      <text x="${x+20}" y="118" font-size="13" fill="currentColor">bootstrapping keys</text><text x="${x+320}" y="118" text-anchor="end" font-size="13" fill="currentColor" class="mono">${keys}</text>
+      <text x="${x+20}" y="146" font-size="13" fill="currentColor">external products used</text><text x="${x+320}" y="146" text-anchor="end" font-size="13" fill="currentColor" class="mono">${ops}</text>
+      <text x="${x+20}" y="174" font-size="13" fill="currentColor">toy key size</text><text x="${x+320}" y="174" text-anchor="end" font-size="13" fill="currentColor" class="mono">${res[1]}</text>
+      <text x="${x+20}" y="212" font-size="13" fill="currentColor">decrypts to</text><text x="${x+320}" y="212" text-anchor="end" font-size="22" font-weight="700" fill="currentColor" class="mono c-ok">${res[0]}</text>
+      <text x="${x+20}" y="240" font-size="12" fill="currentColor" class="c-muted">${res[2]}</text></g>`;
+    let g=col(40,"CMux / GINX (TFHE)","needs a binary (or small) secret key",T.n+" GGSW",T.n,[R.ginx,R.toy.cggi.toFixed(0)+" KiB","output noise ≈ 2^"+lg(R.eG)],"c-server");
+    g+=col(420,"AP accumulator (FHEW)","works for any secret key",T.n+"·"+T.K.ap.digits+"·"+T.K.ap.Br+" = "+(T.n*T.K.ap.digits*T.K.ap.Br)+" GGSW",R.ap.used,[R.apv,(R.toy.ap/1024).toFixed(2)+" MiB","output noise ≈ 2^"+lg(R.eA)],"c-server");
+    g+=small(40,305,"Both computed here on the same encrypted neuron (m = "+R.m+"). y = "+R.ginx+" / 40 = "+f(R.ginx/40)+".");
+    return svg(320,g,"Side-by-side: the CMux accumulator uses four keys and four external products; the AP accumulator uses ninety-six keys but works for any secret; both decrypt to 14."); },
+  play(){ LS.A(".colg",[{opacity:0,transform:"translateY(14px)"},{opacity:1,transform:"none"}],{s:400,d:600}); },
+  math:()=>`<div class="formula">CMux:  ACC ← ACC + GGSW(sᵢ) ⊡ (X^āᵢ·ACC − ACC),   i = 1…n</div><div class="formula">AP:    ACC ← GGSW(X^(dᵢⱼ·8ʲ·sᵢ)) ⊡ ACC   for each base-8 digit dᵢⱼ ≠ 0 of āᵢ</div><p>CMux result ${R.ginx} (noise ${R.eG}), AP result ${R.apv} (noise ${R.eA}). The AP keys cover every digit value 0…7 in each of ${T.K.ap.digits} base-8 digits of every āᵢ.</p>`,
+  explain:()=>`<p>The accumulator has to multiply the test polynomial by X^(āᵢsᵢ) for each key coefficient sᵢ, without knowing sᵢ.</p>
+  <p><b>CMux (GINX, used by TFHE)</b> encrypts each bit sᵢ once and computes "if sᵢ then rotate by āᵢ". That needs one key per bit and one external product per bit. It only works directly when sᵢ is 0 or 1.</p>
+  <p><b>AP (Alperin-Sheriff–Peikert, used by FHEW)</b> writes each āᵢ in base 8 and stores a key for X^(v·8ʲ·sᵢ) for every digit value v. The accumulator picks the right key for each digit and multiplies. It works for any secret, including the ternary and Gaussian secrets that threshold FHE needs, but the key grows by a factor of digits × base.</p>
+  <p>Both are real here and agree. The key-size gap is the problem the next variants attack.</p>`
+},
+{ key:"AP keys", who:"server", whoT:"server", at:1, budget:"1 used", scale:"base 8", err:()=>R.eA/D,
+  title:"Inside the AP accumulator",
+  cap:()=>`Each rounded āᵢ is split into ${T.K.ap.digits} base-8 digits. The server picks one stored key per non-zero digit, so only ${R.ap.used} of the ${T.n*T.K.ap.digits*T.K.ap.Br} keys are touched this time.`,
+  scene(){ let g=lbl(40,36,"KEY GRID: row = key index i, block = digit position j, cell = digit value v","font-weight=\"700\"");
+    for(let i=0;i<T.n;i++){ g+=lbl(40,82+i*56,`ā${sub(i+1)} = ${R.cs.a[i]}`,'class="mono"');
+      for(let j=0;j<T.K.ap.digits;j++){ const d=R.digits[i][j]; for(let v=0;v<8;v++){ const x=170+j*200+v*22, y=62+i*56, on=v===d&&d!==0;
+        g+=`<g class="${on?"c-ok":"c-server"} kc"><rect x="${x}" y="${y}" width="18" height="28" rx="3" fill="currentColor" fill-opacity="${on?.7:.1}" stroke="currentColor" stroke-opacity="${on?1:.35}"/><text x="${x+9}" y="${y+19}" text-anchor="middle" font-size="10" fill="currentColor" class="mono">${v}</text></g>`; } } }
+    for(let j=0;j<T.K.ap.digits;j++) g+=small(170+j*200+88,290,"digit j = "+j+" (×8"+sup(j)+")",'text-anchor="middle"');
+    g+=small(40,312,"Green = key used for this ciphertext. A digit 0 needs no key, so it is skipped.");
+    return svg(325,g,"A grid of 96 keys; the green cells are the keys chosen by the base-8 digits of each rounded a value."); },
+  play(){ LS.A(".kc",[{opacity:0},{opacity:1}],{s:6,d:250}); },
+  math:()=>`<p>Digits (least significant first): ${R.cs.a.map((a,i)=>`ā${sub(i+1)} = ${a} → [${R.digits[i].join(", ")}]`).join(";  ")}.</p><p>Keys stored: n·digits·base = ${T.n}·${T.K.ap.digits}·8. Real FHEW: n ≈ 500, base 23 to 32, 2 or 3 digits, so tens of thousands of GGSW ciphertexts. That is the ~1 GB key of the original scheme.</p>`,
+  explain:()=>`<p>AP trades key size for flexibility. Because there is a key for every possible digit value, the accumulator never needs to branch on a secret bit. It just multiplies by the key selected by a public digit of āᵢ. That is why it works for any secret distribution.</p>
+  <p>The cost is visible in the grid: 96 stored keys to use at most 12. Real parameters multiply this by a factor of about 100.</p>`
+},
+{ key:"Automorphisms", who:"server", whoT:"server", at:1, budget:"1 used", scale:"X → X^g", err:()=>0, sim:true,
+  title:"LMKCDEY: rotate with automorphisms",
+  cap:()=>`LMKCDEY rotates with the maps X → X^g instead of multiplying by X^a. Keys are needed only for a few automorphisms and one encryption per secret coefficient, for any secret distribution.`,
+  scene(){ const cx=200,cy=170,r=118, M=32; let g=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="currentColor" stroke-opacity=".3" stroke-width="2"/>`;
+    const gg=5, pos=k=>{ const a=2*Math.PI*k/M; return [cx+r*Math.sin(a), cy-r*Math.cos(a)]; };
+    for(let k=1;k<M;k+=2){ const [x,y]=pos(k); g+=`<g class="c-server"><circle cx="${P2(x)}" cy="${P2(y)}" r="9" fill="var(--panel)" stroke="currentColor"/><text x="${P2(x)}" y="${P2(y+3.5)}" text-anchor="middle" font-size="9" fill="currentColor" class="mono">${k}</text></g>`; }
+    let k=1; for(let t=0;t<8;t++){ const k2=(k*gg)%M; const [x1,y1]=pos(k),[x2,y2]=pos(k2); g+=`<g class="c-ok"><path class="au" pathLength="1" stroke-dasharray="1" d="M${P2(x1+(x2-x1)*13/Math.hypot(x2-x1,y2-y1))},${P2(y1+(y2-y1)*13/Math.hypot(x2-x1,y2-y1))} L${P2(x2-(x2-x1)*14/Math.hypot(x2-x1,y2-y1))},${P2(y2-(y2-y1)*14/Math.hypot(x2-x1,y2-y1))}" stroke="currentColor" stroke-width="2" marker-end="url(#ahk)"/></g>`; k=k2; }
+    g+=small(cx,cy+r+28,"the 16 odd exponents mod 2N = 32",'text-anchor="middle"');
+    g+=lbl(400,50,"Toy ring with 2N = 32: X → X⁵ walks the odd exponents","font-weight=\"700\"")+small(400,72,"1 → 5 → 25 → 29 → 17 → 21 → 9 → 13 → 1")+small(400,88,"(a real computation of 5ᵏ mod 32, shown without encryption)");
+    g+=lbl(400,130,"How the rotation is built","font-weight=\"700\"");
+    ["write each āᵢ as ±5ᵏ mod 2N (rounded to odd)","ACC ← automorphism X → X^(5ᵏ) of ACC (key switch)","ACC ← ACC ⊡ RGSW(X^(sᵢ)) once per coefficient","only ~log N automorphism keys + n RGSW keys"].forEach((t,i)=>{ g+=small(400,154+i*20,(i+1)+". "+t); });
+    g+=lbl(400,260,"Cited: >30% smaller evaluation keys than","class=\"c-server\"")+lbl(400,278,"the best previous method, any secret","class=\"c-server\"")+small(400,296,"(Lee, Micciancio, Kim, Choi, Deryabin, Eom, Yoo, EUROCRYPT 2023)");
+    return svg(315,g,"A ring of odd exponents with arrows showing how the map X to X to the fifth walks through them; a list of the four steps of automorphism-based blind rotation."); },
+  play(){ draw(".au",0,500); },
+  math:()=>`<div class="formula">ψ_g : X ↦ X^g on Z[X]/(X^N + 1),  g odd;   ψ_g(X^a) = X^(a·g)</div><p>Instead of a key per bit (CMux) or per digit value (AP), LMKCDEY stores RGSW encryptions of X^(sᵢ) and key-switching keys for a few automorphisms. The ā values are mapped into the group generated by 5 and −1, and the rotations are done by applying automorphisms. This page does not run it encrypted (marked "plaintext simulation").</p>`,
+  explain:()=>`<p>The ring Z[X]/(X^N + 1) has symmetries called <b>automorphisms</b>: X ↦ X^g for any odd g. They permute the exponents, as the arrows show for g = 5.</p>
+  <p>LMKCDEY uses them to build the rotation X^(āᵢsᵢ). Applying an automorphism to the accumulator rescales all exponents at once, and an external product with RGSW(X^(sᵢ)) brings in the secret. Because sᵢ enters as an exponent, it can be any small integer, not just a bit. That matches AP's flexibility with keys about as small as CMux's.</p>
+  <p>This matters for threshold FHE (Lesson 11), where secrets are sums of several parties' shares and are no longer binary.</p>`
+},
+{ key:"FINAL", who:"server", whoT:"server", at:1, budget:"—", scale:"NTRU", err:()=>0, sim:true,
+  title:"FINAL: NTRU instead of ring-LWE",
+  cap:()=>`An NTRU ciphertext is a single polynomial c = (m + e)/f, not a pair (A, B). FINAL builds its bootstrapping keys from NTRU and keeps LWE for the data, which shrinks keys and speeds up bootstrapping.`,
+  scene(){ const pair=(x,y,lab,n,cls)=>`<g class="${cls}">${Array.from({length:n},(_,i)=>`<rect x="${x+i*26}" y="${y}" width="22" height="30" rx="3" fill="currentColor" fill-opacity=".25" stroke="currentColor"/>`).join("")}</g>`+small(x,y+48,lab);
+    let g=lbl(40,40,"Shape of one ring element in the bootstrapping key","font-weight=\"700\"");
+    g+=lbl(40,86,"Ring-LWE / GLWE (TFHE)","class=\"c-server\"")+pair(240,64,"A(X)",8,"c-server")+pair(470,64,"B(X)",8,"c-server");
+    g+=lbl(40,166,"NTRU (FINAL)","class=\"c-ok\"")+pair(240,144,"c(X) = (m + e) · f⁻¹",8,"c-ok");
+    g+=small(40,232,"NTRU decrypts by multiplying with the secret f: c·f = m + e. One polynomial instead of two.");
+    g+=lbl(40,272,"Cited (FINAL, ASIACRYPT 2022): 28% faster bootstrapping and 45% smaller","class=\"c-server\"")+lbl(40,292,"bootstrapping and key-switching keys than TFHE, with NTRU parameters","class=\"c-server\"")+lbl(40,312,"chosen outside the overstretched range that broke LTV and YASHE.","class=\"c-server\"");
+    return svg(330,g,"A ring-LWE ciphertext is two polynomials; an NTRU ciphertext is one polynomial, which is where FINAL saves key size."); },
+  play(){ LS.A("rect",[{opacity:0,transform:"scaleY(0)"},{opacity:1,transform:"scaleY(1)"}],{s:25,d:400}); },
+  math:()=>`<div class="formula">NTRU:  h = g·f⁻¹ mod q,   c = h·r + m·Δ + e,   c·f = g·r + f·(m·Δ + e)</div><p>Early NTRU FHE (LTV 2012, YASHE 2013) needed a huge modulus relative to the key, the "overstretched" regime, and subfield lattice attacks broke those parameters (Albrecht et al., CRYPTO 2016). FINAL stays in the safe range and uses NTRU only inside bootstrapping, where its compactness helps most. FINALLY (CIC 2024) extends it to multi-key FHE.</p>`,
+  explain:()=>`<p>NTRU is the other big family of lattice encryption. A ciphertext is one polynomial, and decryption multiplies it by the secret polynomial f.</p>
+  <p>Old NTRU-based FHE (LTV, YASHE) was broken in practice because homomorphic use needed parameters where NTRU becomes easy. FINAL's insight is to stay in the secure parameter range and use NTRU only for the bootstrapping key's external products, while data stays in LWE. That keeps security and saves size, because one polynomial replaces two.</p>`
+},
+{ key:"Key sizes", who:"both", whoT:"comparison", at:0.5, budget:"—", scale:"bytes", err:()=>0,
+  title:"Bootstrapping key sizes",
+  cap:()=>`Key size is the cost students forget. Real figures are cited from the papers; toy figures are computed from this page's keys. Same accumulator design, very different keys.`,
+  scene(){ const rows=[["FHEW (as cited by TFHE)",1024*1024,"cited","c-server"],["AP keys (cited by LFHE)",800*1024,"cited","c-server"],["TFHE (CGGI 2016)",16*1024,"cited","c-server"],["LFHE packed transfer",1024,"cited: under 1 MB","c-server"],["toy AP keys (this page)",R.toy.ap,"computed","c-ok"],["toy CMux keys (this page)",R.toy.cggi,"computed","c-ok"]];
+    const W0=280,W1=740, lo=Math.log2(16), hi=Math.log2(2*1024*1024), bw=v=>(W1-W0)*Math.max(0.02,(Math.log2(v)-lo)/(hi-lo));
+    let g=lbl(40,36,"Bootstrapping key size, log scale (KiB)","font-weight=\"700\"");
+    [64,1024,16384,262144,1048576].forEach(v=>{ const x=W0+(W1-W0)*(Math.log2(v)-lo)/(hi-lo); g+=`<line x1="${P2(x)}" y1="52" x2="${P2(x)}" y2="276" stroke="currentColor" opacity=".15"/>`+small(x,294,v>=1048576?"1 GiB":v>=1024?(v/1024)+" MiB":v+" KiB",'text-anchor="middle"'); });
+    rows.forEach((rw,i)=>{ const y=58+i*36; g+=small(40,y+17,rw[0])+`<g class="${rw[3]}"><rect class="eb" x="${W0}" y="${y}" width="${P2(bw(rw[1]))}" height="24" rx="3" fill="currentColor" fill-opacity="${rw[2]==="computed"?1:.7}"/><text x="${P2(W0+bw(rw[1])+8)}" y="${y+17}" font-size="11.5" fill="currentColor">${rw[2]}</text></g>`; });
+    g+=small(40,316,"Relative claims (no absolute size given): LMKCDEY > 30% smaller than the best previous; FINAL 45% smaller than TFHE.");
+    return svg(330,g,"Log-scale bars of bootstrapping key sizes: about a gigabyte for FHEW, 800 MB for AP keys, 16 MB for TFHE, under a megabyte for LFHE's packed transfer, and the toy sizes."); },
+  play(){ growX(".eb",0,180); },
+  math:()=>`<p>Toy: one GGSW = 2ℓ·2·N·32 bits = ${(ggswBits/8/1024).toFixed(0)} KiB. CMux keys n = ${T.n} GGSW = ${R.toy.cggi.toFixed(0)} KiB. AP keys n·digits·base = ${T.n*T.K.ap.digits*8} GGSW = ${(R.toy.ap/1024).toFixed(2)} MiB. Key-switching key ${R.toy.ksk.toFixed(0)} KiB.</p><p>Cited: TFHE abstract ("16MB bootstrapping key instead of 1GB"); LFHE (Kim, Lee, Deryabin, Eom, Choi, 2023) states AP keys need "approximately 800 MB" and achieves "packed evaluation key transferring size of less than a Megabyte".</p>`,
+  explain:()=>`<p>In private LLM inference the client must send its evaluation keys to the server once. For CKKS these are gigabytes of rotation keys. For FHEW-style schemes the bootstrapping key dominates.</p>
+  <p>The chart shows the trend: AP-based FHEW needed about a gigabyte, TFHE's CMux brought it to 16 MB, and later work goes below a megabyte for transfer by sending a compressed seed that the server expands. This bandwidth matters as much as runtime for a phone talking to a server.</p>`
+},
+{ key:"SIMD ALU", who:"server", whoT:"server", at:1, budget:"amortized", scale:"words", err:()=>0, sim:true,
+  title:"SIMD ALU: many words per bootstrap",
+  cap:()=>`FHEW-style schemes bootstrap one value at a time. The 2026 SIMD ALU scheme packs many machine words and spreads the bit-by-bit iterations across them, so the cost per word becomes constant.`,
+  scene(){ const n=64, items=[["DM / CGGI multiply","O(n²)",n*n],["CPL multiply","O(log n)",Math.log2(n)],["triangle encoding (amortized)","O(1)",1]];
+    const W0=300,W1=640, bw=v=>(W1-W0)*Math.log2(v+1)/Math.log2(n*n+1);
+    let g=lbl(40,36,"Bootstraps per 64-bit operation (shape of the complexity, not measured)","font-weight=\"700\"");
+    items.forEach((it,i)=>{ const y=60+i*44; g+=small(40,y+17,it[0])+`<g class="c-server"><rect class="eb" x="${W0}" y="${y}" width="${P2(Math.max(4,bw(it[2])))}" height="26" rx="3" fill="currentColor" fill-opacity=".75"/><text x="${P2(W0+Math.max(4,bw(it[2]))+8)}" y="${y+18}" font-size="12" fill="currentColor" class="mono">${it[1]} ≈ ${Math.round(it[2])}</text></g>`; });
+    g+=lbl(40,220,"Cited (Gao–Zheng, CRYPTO 2026): 1.7× to 2× higher throughput than CPL even when","class=\"c-server\"")+lbl(40,240,"bootstrapping after every multiplication; refreshing needs only two CKKS bootstraps.","class=\"c-server\"");
+    g+=small(40,270,"It reuses discrete CKKS (Lesson 9) as its boolean mode, so it sits between FHEW-style exactness and CKKS-style packing.");
+    return svg(290,g,"Bars comparing the number of bootstraps per 64-bit multiplication: quadratic for gate-based schemes, logarithmic for CPL, constant for the triangle encoding."); },
+  play(){ growX(".eb",0,300); },
+  math:()=>`<p>Counts are the formulas evaluated at n = 64 bits: n² = 4096, log₂ n = 6, and 1. They show the asymptotic shape, not timings. The scheme's "triangle encoding" lets each bootstrapping iteration on a combined ciphertext process several words. Its extension (2026/1869) supports arbitrary moduli with O(1) bootstrapping.</p>`,
+  explain:()=>`<p>A 64-bit integer multiplication built from FHEW gates costs thousands of bootstraps. Recent schemes cut that to a handful by working on many words at once and by borrowing CKKS's packing.</p>
+  <p>The SIMD ALU scheme amortizes the bit-level iterations across many ciphertexts, so on average each word needs a constant number of bootstraps. For LLM inference this points toward exact integer arithmetic at packed throughput, a middle ground between Lesson 1 and Lesson 6.</p>`
+},
+{ key:"Result", who:"client", whoT:"client", at:0, budget:"1 used", scale:"exact", err:()=>R.inRange?0:"out of table",
+  title:"Decrypt: the neuron, exactly",
+  cap:()=>R.inRange?`Both accumulators decrypt to ${R.ginx}, so y = <b>${f(R.ginx/40)}</b>, exact ReLU of the quantized neuron. The difference between them is keys and flexibility, not the answer.`:`m = ${R.m} is outside the 32-entry table for this input.`,
+  scene(){ let g=`<g class="c-ok big"><text x="40" y="60" font-size="13" fill="currentColor" font-weight="700">CMUX ACCUMULATOR</text><text x="40" y="110" font-size="44" font-family="var(--mono)" fill="currentColor">${f(R.ginx/40)}</text></g>
+      <g class="c-ok big"><text x="300" y="60" font-size="13" fill="currentColor" font-weight="700">AP ACCUMULATOR</text><text x="300" y="110" font-size="44" font-family="var(--mono)" fill="currentColor">${f(R.apv/40)}</text></g>
+      <g class="c-ok big"><text x="560" y="60" font-size="13" fill="currentColor" font-weight="700">TRUE ReLU(z)</text><text x="560" y="110" font-size="44" font-family="var(--mono)" fill="currentColor">${f(R.nn.relu)}</text></g>`;
+    g+=lbl(40,170,"NAND truth table from step 1: "+R.gates.map(r=>r.out).join(" ")+"  (expected 1 1 1 0)","class=\"mono\"");
+    g+=small(40,196,"Noise after bootstrapping: CMux 2^"+lg(R.eG)+", AP 2^"+lg(R.eA)+" (one sector is 2²⁶).");
+    return svg(215,g,"Both accumulators decrypt to 0.35, equal to the true ReLU."); },
+  play(){ pop(".big",0,250); },
+  math:()=>`<div class="formula">CMux: ${R.ginx}/40 = ${f(R.ginx/40)}   AP: ${R.apv}/40 = ${f(R.apv/40)}</div>`,
+  explain:()=>`<p>The two accumulators compute the same function and give the same exact answer. Choosing between FHEW-family schemes is about key size, secret-key flexibility, speed and amortization, as the card summarises.</p>`
+}];
+
+const cfg={ id:"fhew", title:"FHEW Step by Step", compute, setup:()=>{ T.keygen(); apReady=false; },
+  inputNote:"x is rounded to one decimal. Keep 0 ≤ 20·x₁ − 10·x₂ + 20 ≤ 31.",
+  status:{ budgetLabel:"Bootstraps", scaleLabel:"Domain", errLabel:"Noise / Δ" },
+  footer:'Real toy runs reuse the Lesson 6 engine (Q = 2³², n = 4, N = 256). AP keys: base 8, 3 digits. Steps marked "plaintext simulation" explain schemes this page does not run encrypted. Papers: Ducas–Micciancio, <a href="https://eprint.iacr.org/2014/816">FHEW, EUROCRYPT 2015</a>; Lee et al., <a href="https://eprint.iacr.org/2022/198">EUROCRYPT 2023</a>; Bonte et al., <a href="https://eprint.iacr.org/2022/074">FINAL, ASIACRYPT 2022</a>; Gao–Zheng, <a href="https://eprint.iacr.org/2026/233">CRYPTO 2026</a>.',
+  cardResult:()=>R.inRange?`${f(R.ginx/40)} (CMux) and ${f(R.apv/40)} (AP) for a true ${f(R.nn.relu)}`:"out of table range",
+  steps };
+steps.push(LS.cardStep(cfg,{name:"FHEW family",budget:"1 used",scale:"exact",
+  extra:()=>`<div class="next"><div><b>Versus TFHE</b><br>Same blind-rotation idea; AP supports any secret, at a large key cost.</div><div><b>Small keys</b><br>LMKCDEY and LFHE make keys small without losing flexibility.</div><div><b>Next</b><br>Scheme switching: pair packed linear algebra with these exact bootstraps.</div></div>`}));
+LS.start(cfg);
+})();
+</script>
+</body>
+</html>

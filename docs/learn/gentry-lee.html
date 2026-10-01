@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gentry–Lee Step by Step</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lesson.css">
+</head>
+<body>
+<div id="app"></div>
+<script src="lessons.js"></script>
+<script src="cards/gentry-lee.js"></script>
+<script src="lesson.js"></script>
+<script src="engines/gl.js"></script>
+<script>
+(function(){
+"use strict";
+const {svg,tile,lock,lbl,small,arrow,pop,fade,draw,slide,blink,growX,f,fe,sup,big}=LS;
+const n=2, G=GL.make({n,deltaBits:20,qBits:90}), D=G.D, DD=D*D;
+const W=LS.W, B=LS.B, C0=0.09375, C1=0.5, C2=0.46875;
+const gstr=(v,short)=>{ const r=v[0], i=v[1]; const fmt=x=>{ const s=x.toString(); return short&&s.length>9?s.slice(0,s[0]==="-"?5:4)+"…":s; };
+  if(i===0n) return big(fmt(r)); return big(fmt(r))+(i<0n?" − ":" + ")+fmt(i<0n?-i:i)+"i"; };
+const hexg=(v,q)=>LS.hex(v[0],q,4);
+const z0=(v,d)=>f(Math.abs(v)<0.5*10**-d?0:v,d);
+let R;
+function compute(inp){
+  const x=[inp.x1,inp.x2], N=LS.neuron(x);
+  const U=[[x[0],x[1]],[0,0]], V=[[n*W[0],n*W[1]],[0,0]];
+  const mu=G.encode(U), mv=G.encode(V), ct=G.encrypt(mu), du=G.dec2(ct);
+  const p=G.ptStar(ct,mv), dp=G.dec2(p), Cm=G.decode(dp,DD);
+  const zb=G.addPt(p,G.encode([[B,0],[0,0]],DD)), z=G.rescale(zb), vz=G.decode(G.dec2(z))[0][0];
+  const u=G.rescale(G.scalCt(z,BigInt(Math.round(C2*Number(D))))), z1=G.down(z,u.q);
+  const sq=G.hadamard(u,z1), lin=G.scalCt(z1,BigInt(Math.round(C1*Number(D))));
+  let y=G.addCt(sq,{c:[lin.c[0],lin.c[1],G.zero()],q:lin.q}); y=G.addPt(y,G.encode([[C0,C0],[C0,C0]],DD));
+  const vy=G.decode(G.dec3(y),DD)[0][0];
+  const cv=G.encrypt(mv), c4=G.ctStar(ct,cv), C4=G.decode(G.dec4(c4),DD);
+  const poly=C0+C1*N.z+C2*N.z*N.z;
+  const e=du.map((r,a)=>r.map((v,b)=>[v[0]-mu[a][b][0],v[1]-mu[a][b][1]]));
+  R={...N,U,V,mu,mv,ct,du,e,p,Cm,vz,vy,poly,C4,qz:z.q,qy:y.q,s:G.s,
+     back:G.decode(mu), dec:G.decode(du)};
+  return R;
+}
+/* ---------- drawing helpers ---------- */
+const mat=(x,y,cells,cls,extra="",w=74,h=44,gap=6,fs=14)=>cells.map((row,j)=>row.map((t,k)=>tile(x+k*(w+gap),y+j*(h+gap),w,h,t,typeof cls==="function"?cls(j,k):cls,extra,fs)).join("")).join("");
+const bracket=(x,y,w,h)=>`<path d="M${x+8},${y} h-8 v${h} h8 M${x+w-8},${y} h8 v${h} h-8" fill="none" stroke="currentColor" stroke-width="2"/>`;
+const rotations=k=>({diag:k-1, bsgs:Math.ceil(2*Math.sqrt(k))-2, gl:0});
+
+const steps=[
+{ key:"Example", who:"both", whoT:"the task", at:0, budget:3, scale:"—", err:()=>0,
+  title:"The neuron as a matrix product",
+  cap:()=>`Put x in the first row of a 2×2 matrix U and w in the first row of V. Then the top-left entry of U·V* is w·x = <b>${f(R.dot,2)}</b>, and z = ${f(R.z,2)}.`,
+  scene(){ const xs=R.x.map(v=>+v.toFixed(3));
+    return svg(300,`
+      ${small(40,40,"U (client, encrypted)")}${bracket(32,52,168,98)}
+      ${mat(40,54,[[xs[0],xs[1]],["0","0"]],(j)=>j?"c-muted":"c-client","mU")}
+      <text x="230" y="110" font-size="26" fill="currentColor" text-anchor="middle">·</text>
+      ${small(262,40,"V* (server weights, ×n = 2)")}${bracket(254,52,168,98)}
+      ${mat(262,54,[["1","0"],["−0.5","0"]],(j,k)=>k?"c-muted":"c-server","mV")}
+      <text x="452" y="110" font-size="26" fill="currentColor" text-anchor="middle">=</text>
+      ${small(484,40,"C = U·V*  (top-left = w·x)")}${bracket(476,52,168,98)}
+      ${mat(484,54,[[f(R.dot,2),"0"],["0","0"]],(j,k)=>j||k?"c-muted":"c-ok","mC")}
+      ${arrow(664,78,700,78,"ahk","c-ok")}<g class="c-ok"><text x="712" y="74" font-size="13" fill="currentColor">+ b = ${f(R.z,2)}</text><text x="712" y="94" font-size="12" fill="currentColor">then ReLU</text></g>
+      ${small(40,190,"V* is the conjugate transpose of V, so its first column holds the weights. One native product computes the whole dot product.")}
+      ${small(40,214,"In a real LLM, U is a block of token embeddings and V a block of a weight matrix: the same single product.")}`,
+      "Matrix U with x in its first row times the conjugate transpose of V with w in its first column gives a matrix whose top-left entry is the dot product."); },
+  play(){ pop(".mU",0,60); pop(".mV",400,60); pop(".mC",900,60); fade(".c-ok text",1300); },
+  math:()=>`<div class="formula">U = [[${R.x[0]}, ${R.x[1]}], [0, 0]],  V = n·[[${W[0]}, ${W[1]}], [0, 0]]</div><div class="formula">[U·V*]₀₀ = Σᵥ U₀ᵥ · conj(V₀ᵥ) = ${f(R.x[0],2)}·1 + ${f(R.x[1],2)}·(−0.5) = ${f(R.dot)}</div><p>The scheme's product returns (1/n)·U·V*, so the server pre-multiplies its weights by n = 2.</p>`,
+  explain:()=>`<p>CKKS treats a ciphertext as a vector of slots, so every matrix product must be rebuilt from slot-wise multiplications and rotations. The Gentry–Lee (GL) scheme starts from the other end. A ciphertext holds a whole <b>matrix</b>, and matrix multiplication is a native operation.</p><p>To fit our neuron into that shape, we write x as the first row of a matrix U and the weights as the first row of V. The native operation computes U·V*, the product of U with the conjugate transpose of V. Its top-left entry is exactly w₁x₁ + w₂x₂. The other entries are zero because the other rows are zero.</p><p>In an LLM the matrices are real blocks, such as 128 tokens × 128 features times a 128 × 128 weight block. The point of this lesson is that the work of step 5 in the CKKS lesson, rotate and add, disappears.</p>` },
+{ key:"Rings + key", who:"client", whoT:"client", at:0, budget:3, scale:"—", err:()=>0,
+  title:"Two rings and one small key",
+  cap:()=>`Coefficients are Gaussian integers a + bi mod q. The secret key s(X) lives in a small ring with X² = i. Messages live in a bigger ring with a second variable Y.`,
+  scene(){ const s=R.s.map(r=>gstr(r[0]));
+    return svg(320,`
+      ${lbl(40,40,"SECRET KEY  s(X) = s₀ + s₁X","class=\"c-client\" font-weight=\"700\"")}${small(40,60,"in R = Z_q[i][X] / (X² − i), coefficients in {−1,0,1} + {−1,0,1}i")}
+      <g class="sk">${tile(40,74,130,48,s[0],"c-client")}</g><g class="sk">${tile(180,74,130,48,s[1],"c-client")}</g>
+      ${small(105,140,"s₀",'text-anchor="middle"')}${small(245,140,"s₁",'text-anchor="middle"')}
+      ${lock(320,90)}
+      <line x1="390" y1="30" x2="390" y2="300" stroke="currentColor" opacity=".25"/>
+      ${lbl(420,40,"MESSAGE / CIPHERTEXT RING  R′","font-weight=\"700\"")}${small(420,60,"Z_q[i][X, Y] / (X² − i, Y² − i): a 2×2 grid of coefficients")}
+      <g class="grid">${small(470,86,"Y⁰",'text-anchor="middle"')}${small(570,86,"Y¹",'text-anchor="middle"')}${small(410,124,"X⁰")}${small(410,174,"X¹")}
+      ${mat(430,100,[["m₀₀","m₀₁"],["m₁₀","m₁₁"]],"c-muted","g",80,42,20,13)}</g>
+      <g class="c-server cols"><rect x="425" y="94" width="90" height="116" rx="8" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="5 4"/><rect x="525" y="94" width="90" height="116" rx="8" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="5 4"/></g>
+      <g class="c-server">${small(630,140,"each column is an")}${small(630,156,"ordinary RLWE ciphertext")}${small(630,172,"under the same s(X)")}</g>
+      ${small(420,290,"R ≅ Z_q[X]/(X⁴ + 1): security is plain Ring-LWE, same ring as the CKKS toy")}`,
+      "The secret key is a two-coefficient Gaussian-integer polynomial; messages are two-by-two coefficient grids whose columns are standard RLWE ciphertexts."); },
+  play(){ pop(".sk",0,150); pop(".lock",400); fade(".grid",600); blink(".cols",1100); },
+  math:()=>`<div class="formula">s(X) = (${gstr(R.s[0][0])}) + (${gstr(R.s[1][0])})·X</div><div class="formula">R = Z_q[i][X]/(Xⁿ − i) ≅ Z_q[X]/(X²ⁿ + 1),   R′ = R[Y]/(Yⁿ − i),   n = 2,  q = 2⁹⁰</div><p>Paper, §3.2: a ciphertext over R′ is n independent RLWE ciphertexts over R, so security reduces to standard RLWE over R (or Z_q[X]/Φ₄ₙₚ(X) when batching φ(p) matrices).</p>`,
+  explain:()=>`<p>GL rests on two observations. The first is a change of viewpoint. The usual RLWE ring Z[X]/(X⁴ + 1) can be rewritten as Z[i][X]/(X² − i), a polynomial ring whose coefficients are Gaussian integers a + bi. It is the same ring, so the security is unchanged.</p><p>The second is a <b>second variable</b> Y with Y² = i. A message polynomial m(X, Y) now has an n × n grid of coefficients. The secret key s(X) does not involve Y at all. A ciphertext over the big ring is therefore just n ordinary RLWE ciphertexts, one per power of Y, all under the same key.</p><p>The full scheme adds a third variable W for batching φ(p) matrices at once. This toy uses p = 1, one 2 × 2 matrix per ciphertext, which the paper uses as its own warm-up example (§3.4).</p>` },
+{ key:"Encode", who:"client", whoT:"client", at:0, budget:3, scale:"Δ = 2²⁰", err:()=>Math.abs(R.back[0][0]-R.x[0]),
+  title:"Encode a matrix",
+  cap:()=>`Each matrix entry is the polynomial's value at a pair of roots (ζⱼ, ζₖ). Inverting that 2-D transform and scaling by Δ gives the coefficient grid.`,
+  scene(){ const M=[[R.x[0],R.x[1]],[0,0]].map(r=>r.map(v=>+v.toFixed(3)));
+    const co=R.mu.map(r=>r.map(v=>gstr(v,true)));
+    return svg(300,`
+      ${small(40,40,"MATRIX U (slots)")}${mat(40,52,M,(j)=>j?"c-muted":"c-client","s1",80,46,8)}
+      ${small(40,180,"Uⱼₖ = m(ζⱼ, ζₖ) / Δ")}
+      ${arrow(232,99,318,99,"ahm")}${small(275,86,"inverse 2-D",'text-anchor="middle"')}${small(275,124,"transform, × Δ",'text-anchor="middle"')}
+      ${small(330,40,"COEFFICIENTS mₓᵧ ∈ Z[i]  (rows X⁰, X¹; columns Y⁰, Y¹)")}
+      ${mat(330,52,co,"c-client","s2",190,46,8,12.5)}
+      ${small(330,180,"roots: ζ₀ = e^(iπ/4), ζ₁ = e^(5iπ/4); both square to i")}
+      ${small(40,232,"Decode check: "+R.back.map(r=>"["+r.map(v=>f(v,6)).join(", ")+"]").join(" "))}`,
+      "A two-by-two slot matrix is turned into a two-by-two grid of Gaussian-integer coefficients by an inverse two-dimensional transform."); },
+  play(){ pop(".s1",0,80); fade(".c-muted line",300); slide(".s2",-40,0,500,90); },
+  math:()=>`<div class="formula">m₍ₓᵧ₎ = round( Δ/n² · Σⱼₖ Uⱼₖ · conj(ζⱼ)ˣ · conj(ζₖ)ʸ )</div><div class="formula">${R.mu.map((r,x)=>r.map((v,y)=>`m${LS.sub(x)}${LS.sub(y)} = ${gstr(v)}`).join(",  ")).join(";  ")}</div><p>Orthogonality Σⱼ ζⱼᵏ = n·[k = 0] (paper, Lemma 3.3) makes this transform exactly invertible before rounding.</p>`,
+  explain:()=>`<p>CKKS encodes a vector by evaluating one polynomial at n roots of unity. GL does the same in two dimensions. Entry (j, k) of the matrix is the value of m(X, Y) at X = ζⱼ and Y = ζₖ, where the ζ's are the roots that satisfy ζ² = i.</p><p>Encoding inverts this two-dimensional transform. It multiplies by the scale Δ and rounds every coefficient to a Gaussian integer. As in CKKS, rounding is the first and smallest source of error, and the scale Δ sets the precision.</p><p>Because evaluation at a point respects addition and multiplication, adding or multiplying two encoded polynomials adds or multiplies their matrices <i>entry-wise</i>. That is the Hadamard product. The genuinely new operation, the matrix product, comes in step 4.</p>` },
+{ key:"Encrypt", who:"client", whoT:"client", at:0.5, budget:3, scale:"Δ = 2²⁰", err:()=>Math.abs(R.dec[0][0]-R.x[0]),
+  title:"Encrypt: n RLWE ciphertexts in one",
+  cap:()=>`The ciphertext (b, a) is two random-looking coefficient grids. Using only s(X), b + a·s gives back Δ·m plus a tiny noise.`,
+  scene(){ const gb=R.ct.c[0].map(r=>r.map(v=>hexg(v,G.q0))), ga=R.ct.c[1].map(r=>r.map(v=>hexg(v,G.q0)));
+    const er=R.e.map(r=>r.map(v=>gstr(v)));
+    return svg(320,`
+      ${small(40,36,"b = −a·s + m + e")}${mat(40,46,gb,"c-client","cb",112,40,6,12)}
+      ${small(290,36,"a  (uniform in R′_q)")}${mat(290,46,ga,"c-client","ca",112,40,6,12)}
+      ${small(40,152,"hex of the real parts, mod q = 2⁹⁰: look uniformly random")}
+      ${arrow(270,182,270,206,"ahm")}${small(282,198,"b + a·s(X)")}
+      ${small(40,226,"noise e = (b + a·s) − Δ·m, per coefficient")}${mat(40,236,er,"c-noise","ce",112,36,6,12)}
+      ${lock(560,60)}${small(582,74,"two columns =")}${small(582,90,"two RLWE ciphertexts")}
+      ${small(560,236,"decrypts to U =")}${R.dec.map((r,j)=>small(560,256+j*18,"["+r.map(v=>z0(v,5)).join(", ")+"]")).join("")}`,
+      "Two grids of random-looking coefficients form the ciphertext; combining them with the secret key leaves only small noise in each coefficient."); },
+  play(){ A_bars(); },
+  math:()=>`<div class="formula">b = −a · s(X) + m + e  (mod q),   a ← R′_q uniform,   e small</div><div class="formula">decrypt: b + a·s(X) = Δ·m + e,   e = ${R.e.map(r=>"["+r.map(v=>gstr(v)).join(", ")+"]").join(" ")}</div><p>The toy uses the secret-key form the paper presents (§3.2); a public-key variant works as in CKKS.</p>`,
+  explain:()=>`<p>Encryption is ordinary RLWE, applied column by column. Draw a uniformly random a, compute b = −a·s + m + e, and keep the pair. Since s does not involve Y, the two Y-columns are two independent RLWE ciphertexts that share one key.</p><p>Decryption is b + a·s, which leaves Δ·m + e. The noise is a few units on each coefficient, far below the scale Δ = 2²⁰. So, as in CKKS, it only touches the sixth decimal digit.</p><p>Nothing here is new compared with CKKS. That is deliberate: GL keeps the RLWE security and the noise behaviour, and changes only how messages are arranged and multiplied.</p>` },
+{ key:"⊛ product", who:"server", whoT:"server", at:1, budget:3, scale:"Δ²", err:()=>Math.abs(R.Cm[0][0]-R.dot),
+  title:"One native matrix product, no rotations",
+  cap:()=>`The server computes ct ⊛ V: for each ciphertext half, a small product of coefficient matrices. No rotation and no key switch. It decrypts to U·V*/n = <b>${f(R.Cm[0][0])}</b> in the corner.`,
+  scene(){ const Cm=R.Cm.map(r=>r.map(v=>z0(v,4)));
+    return svg(330,`
+      ${small(40,34,"CIPHERTEXT HALVES")}
+      <g class="c-client half"><rect x="40" y="46" width="150" height="56" rx="8" fill="currentColor" fill-opacity=".1" stroke="currentColor" stroke-width="2"/><text x="115" y="80" text-anchor="middle" font-size="15" class="mono" fill="currentColor">b  (2×2)</text></g>
+      <g class="c-client half"><rect x="40" y="122" width="150" height="56" rx="8" fill="currentColor" fill-opacity=".1" stroke="currentColor" stroke-width="2"/><text x="115" y="156" text-anchor="middle" font-size="15" class="mono" fill="currentColor">a  (2×2)</text></g>
+      <g class="c-server wv"><rect x="250" y="84" width="150" height="56" rx="8" fill="currentColor" fill-opacity=".1" stroke="currentColor" stroke-width="2"/><text x="325" y="118" text-anchor="middle" font-size="15" class="mono" fill="currentColor">V′ᵀ (coeffs)</text></g>
+      <g class="c-server">${small(250,162,"V′ = conj(V) with X ↦ X⁻¹:")}${small(250,178,"a permutation and sign flips")}</g>
+      <text x="220" y="80" font-size="20" fill="currentColor" text-anchor="middle">×</text><text x="220" y="156" font-size="20" fill="currentColor" text-anchor="middle">×</text>
+      ${arrow(404,112,470,74,"ahs","c-server")}${arrow(404,112,470,150,"ahs","c-server")}
+      <g class="c-client out"><rect x="476" y="46" width="132" height="56" rx="8" fill="currentColor" fill-opacity=".12" stroke="currentColor" stroke-width="2"/><text x="542" y="80" text-anchor="middle" font-size="15" class="mono" fill="currentColor">b ⊛ V</text></g>
+      <g class="c-client out"><rect x="476" y="122" width="132" height="56" rx="8" fill="currentColor" fill-opacity=".12" stroke="currentColor" stroke-width="2"/><text x="542" y="156" text-anchor="middle" font-size="15" class="mono" fill="currentColor">a ⊛ V</text></g>
+      ${lock(594,32)}
+      ${small(476,200,"decrypt with the same s(X):")}
+      ${mat(476,210,Cm,(j,k)=>j||k?"c-muted":"c-ok","cm",76,38,6,13)}
+      <g class="c-ok tally">${lbl(40,236,"rotations: 0","font-weight=\"700\"")}${lbl(40,258,"key switches: 0","font-weight=\"700\"")}${lbl(40,280,"coefficient-matrix products: 2 (one per half)","font-weight=\"700\"")}</g>`,
+      "Each ciphertext half is multiplied by the server's permuted coefficient matrix; the results decrypt with the same key to the matrix product, with zero rotations and zero key switches."); },
+  play(){ pop(".half",0,150); slide(".wv",-60,0,300); pop(".out",900,150); pop(".cm",1400,60); fade(".tally",1800); },
+  math:()=>`<div class="formula">a ⊛ b = Tr_Z( a(X, Z) · conj(b)(Y⁻¹, Z⁻¹) )  decodes to  (1/n)·A·B*      (paper, Thm 3.5)</div><div class="formula">ct ⊛ V = (b ⊛ V, a ⊛ V);   (b + a·s) ⊛ V = b ⊛ V + (a ⊛ V)·s(X)   because s has no Z</div><div class="formula">decoded C = ${R.Cm.map(r=>"["+r.map(v=>f(v,6)).join(", ")+"]").join(" ")}   (scale Δ²)</div><p>The trace over the helper variable Z is computed as an ordinary matrix product of coefficient grids (paper, Thm 3.6): c₍ₓ,ᵧ₎ = Σᵤ a₍ₓᵤ₎·conj(b₍ᵧᵤ₎), with Y⁻ʸ = −i·Yⁿ⁻ʸ.</p>`,
+  explain:()=>`<p>This is the heart of GL. The product of two encoded matrices equals a <b>trace</b>. Multiply a(X, Z) by the conjugated b(Y⁻¹, Z⁻¹) and keep only the terms with no Z. Theorem 3.6 of the paper shows that this trace is a plain matrix product of the two coefficient grids, after a permutation with sign flips.</p><p>For a ciphertext times a plaintext matrix, the server applies this product to both halves b and a. The key s(X) has no Z in it, so it slides through the trace. The result still decrypts with the same s(X): no key switching, no rotations, and no extra keys to store.</p><p>At real sizes the cost is a few large matrix products of ciphertext coefficients. These map directly onto BLAS or GPU matrix units, which are exactly what GPUs are built for. The paper uses FLINT for this part.</p>` },
+{ key:"vs CKKS", who:"server", whoT:"comparison", at:1, budget:3, scale:"Δ²", err:()=>Math.abs(R.Cm[0][0]-R.dot),
+  title:"What CKKS would need instead",
+  cap:()=>`For an n×n plaintext matrix times an encrypted vector, CKKS's diagonal method needs n − 1 rotations, about 2√n with baby-step giant-step. GL needs none.`,
+  scene(){ const ns=[2,64,4096], X0=200,X1=600, lg=v=>v<=0?0:Math.log10(v+1)/Math.log10(4097);
+    let g=small(40,34,"ROTATIONS (= rotation keys) FOR ONE n×n MATRIX PRODUCT, LOG SCALE");
+    ns.forEach((k,i)=>{ const r=rotations(k), y=60+i*86;
+      g+=lbl(40,y+24,`n = ${k}`,'font-weight="700"');
+      g+=`<g class="c-server"><rect class="br" x="${X0}" y="${y}" width="${Math.max(2,(X1-X0)*lg(r.diag))}" height="18" rx="3" fill="currentColor"/><text x="${X0+Math.max(2,(X1-X0)*lg(r.diag))+8}" y="${y+14}" font-size="12" fill="currentColor">CKKS diagonal: ${r.diag}</text></g>`;
+      g+=`<g class="c-server"><rect class="br" x="${X0}" y="${y+24}" width="${Math.max(2,(X1-X0)*lg(r.bsgs))}" height="18" rx="3" fill="currentColor" fill-opacity=".55"/><text x="${X0+Math.max(2,(X1-X0)*lg(r.bsgs))+8}" y="${y+38}" font-size="12" fill="currentColor">CKKS BSGS: ≈${Math.max(r.bsgs,1)}</text></g>`;
+      g+=`<g class="c-ok"><rect class="br" x="${X0}" y="${y+48}" width="3" height="18" rx="1" fill="currentColor"/><text x="${X0+12}" y="${y+62}" font-size="12" fill="currentColor">Gentry–Lee: 0</text></g>`; });
+    g+=small(40,320,"Counts from the standard formulas: diagonal method n − 1, baby-step giant-step ≈ 2√n − 2. Our toy is the n = 2 row.");
+    return svg(330,g,"Bar chart of rotation counts for CKKS diagonal and baby-step giant-step methods versus zero for Gentry–Lee at n equal to 2, 64 and 4096."); },
+  play(){ growX(".br",0,90); },
+  math:()=>`<table class="nums"><thead><tr><th>n</th><th>CKKS diagonal</th><th>CKKS BSGS</th><th>Gentry–Lee</th></tr></thead><tbody>${[2,16,64,256,1024,4096].map(k=>{const r=rotations(k);return `<tr><td class="v">${k}</td><td class="v">${r.diag}</td><td class="v">≈${Math.max(r.bsgs,1)}</td><td class="v">0</td></tr>`;}).join("")}</tbody></table><p>Cited (Gentry–Lee paper, §1): for 16 complex 256×256 matrices, key switching took 1.17 s for a Hadamard product and 3.32 s for an encrypted ct×ct matrix product, and the matrix-product arithmetic itself dominated the total.</p>`,
+  explain:()=>`<p>In CKKS, a slot vector can only be multiplied entry by entry. To compute a matrix–vector product, the diagonal method multiplies by each of the n diagonals of the matrix and rotates the vector between them. That costs n − 1 rotations, each one a key switch with its own rotation key. Baby-step giant-step cuts this to about 2√n, but the keys still occupy gigabytes at LLM sizes.</p><p>GL replaces all of that with one native product. That is why the SoK's closing section singles it out: most of what the SoK's packing layouts (row, column, diagonal, cyclic) try to optimise simply does not arise.</p><p>The non-linear parts do not get easier. Softmax, GELU and ReLU still need polynomial approximation and bootstrapping exactly as in CKKS, which the next step shows.</p>` },
+{ key:"Bias + ReLU", who:"server", whoT:"server", at:1, budget:1, scale:"Δ² → Δ → Δ²", err:()=>Math.abs(R.vy-R.poly),
+  title:"Bias and ReLU work as in CKKS",
+  cap:()=>`Add b, rescale, then evaluate the same polynomial p(z) as the CKKS lesson using entry-wise products. The corner decrypts to <b>${f(R.vy)}</b>, against p(z) = ${f(R.poly)}.`,
+  scene(){ const node=(y,t,lv)=>`<g class="pipe"><g class="c-server"><rect x="300" y="${y}" width="220" height="40" rx="6" fill="currentColor" fill-opacity=".1" stroke="currentColor" stroke-width="2"/><text x="410" y="${y+25}" text-anchor="middle" font-size="14" class="mono" fill="currentColor">${t}</text></g><g class="c-client"><rect x="530" y="${y+8}" width="70" height="24" rx="4" fill="currentColor" fill-opacity=".15" stroke="currentColor"/><text x="565" y="${y+25}" text-anchor="middle" font-size="12" class="mono" fill="currentColor">${lv}</text></g></g>`;
+    let g=node(30,"C + b  (scale Δ²)","q = 2⁹⁰")+arrow(410,70,410,92,"ahs","c-server")+node(96,"rescale → z (scale Δ)","q = 2⁷⁰")+arrow(410,136,410,158,"ahs","c-server")+node(162,"u = 0.46875·z, rescale","q = 2⁵⁰")+arrow(410,202,410,224,"ahs","c-server")+node(228,"u ⊙ z + 0.5·z + 0.09375","Δ²");
+    g+=`<g class="c-client res">${lbl(630,120,"decrypts to","class=\"c-muted\"")}<text x="630" y="160" font-size="34" font-family="var(--mono)" fill="currentColor">${f(R.vy)}</text>${small(630,186,"p(z) = "+f(R.poly))}${small(630,204,"ReLU(z) = "+f(R.relu))}</g>`;
+    g+=small(40,60,"z decrypted after rescale:")+`<text x="40" y="92" font-size="26" font-family="var(--mono)" fill="currentColor" class="c-server">${f(R.vz)}</text>`;
+    g+=small(40,296,"⊙ = entry-wise (Hadamard) product = ordinary polynomial multiplication in R′. The toy decrypts the 3-part result with (1, s, s²) instead of relinearizing.");
+    return svg(310,g,"Pipeline: add bias, rescale to z, multiply by a constant and rescale, then an entry-wise product plus linear terms gives the polynomial ReLU, which decrypts close to 0.326."); },
+  play(){ slide(".pipe",-30,0,0,300); pop(".res",1400); },
+  math:()=>`<div class="formula">z = ${f(R.vz,6)}   y = p(z) = 0.09375 + 0.5·z + 0.46875·z² → decrypted ${f(R.vy,6)}  (expected ${f(R.poly,6)}, noise ${fe(Math.abs(R.vy-R.poly))})</div><p>Simplification: after the entry-wise ciphertext product the toy keeps the three-part ciphertext and decrypts it with (1, s, s²). A full implementation relinearizes it with a key-switching key, exactly as in CKKS.</p>`,
+  explain:()=>`<p>Entry-wise multiplication in GL is ordinary polynomial multiplication, because the encoding is evaluation at points. So everything the CKKS lesson did for ReLU carries over unchanged. Rescale to keep the scale near Δ, then use one ciphertext product and a few constant products to evaluate the same degree-2 polynomial.</p><p>The decrypted value matches p(z) up to noise of about 10⁻⁶. It misses ReLU(z) by the same 0.024 approximation gap as CKKS. GL changes the cost of linear algebra, not the difficulty of non-linear functions.</p><p>One simplification is visible in the maths drawer. Real GL relinearizes the three-part ciphertext with a key-switching key. Here we decrypt it directly with s², which gives the same plaintext.</p>` },
+{ key:"ct ⊛ ct", who:"server", whoT:"server", at:1, budget:3, scale:"Δ²", err:()=>Math.abs(R.C4[0][0]-R.dot),
+  title:"Encrypted × encrypted: four products",
+  cap:()=>`If the weights are encrypted too, as for attention's Q·Kᵀ, the product has four parts. It decrypts with s(X) and its mirror s̄(Y⁻¹) to the same <b>${f(R.C4[0][0])}</b>.`,
+  scene(){ const parts=[["b ⊛ b′","1"],["a ⊛ b′","s(X)"],["b ⊛ a′","s̄(Y⁻¹)"],["a ⊛ a′","s(X)·s̄(Y⁻¹)"]];
+    let g=small(40,34,"FOUR COMPONENTS, EACH ONE COEFFICIENT-MATRIX PRODUCT");
+    parts.forEach(([p,k],i)=>{ const y=50+i*52; g+=`<g class="row4"><g class="c-server"><rect x="40" y="${y}" width="150" height="40" rx="6" fill="currentColor" fill-opacity=".1" stroke="currentColor" stroke-width="2"/><text x="115" y="${y+25}" text-anchor="middle" font-size="14" class="mono" fill="currentColor">${p}</text></g><text x="212" y="${y+25}" font-size="16" fill="currentColor" text-anchor="middle">×</text><g class="c-client"><rect x="234" y="${y}" width="150" height="40" rx="6" fill="currentColor" fill-opacity=".1" stroke="currentColor" stroke-width="2"/><text x="309" y="${y+25}" text-anchor="middle" font-size="14" class="mono" fill="currentColor">${k}</text></g></g>`; });
+    g+=`<path d="M396,70 h20 v156 h-20 M416,148 h40" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#ah)"/>`;
+    g+=`${small(468,120,"sum, then decode:")}${mat(468,132,R.C4.map(r=>r.map(v=>z0(v,4))),(j,k)=>j||k?"c-muted":"c-ok","c4",80,40,6,13)}`;
+    g+=small(40,280,"Real GL key-switches the s̄(Y⁻¹) and s·s̄(Y⁻¹) parts back to s(X): roughly 2–4× a Hadamard key switch (paper).");
+    return svg(300,g,"Four component products, each paired with one key term, sum to a ciphertext that decrypts to the same matrix product."); },
+  play(){ slide(".row4",-40,0,0,160); pop(".c4",900,60); },
+  math:()=>`<div class="formula">ct(u) ⊛ ct(v) = (b⊛b′, a⊛b′, b⊛a′, a⊛a′)</div><div class="formula">decrypt = b⊛b′ + (a⊛b′)·s(X) + (b⊛a′)·s̄(Y⁻¹) + (a⊛a′)·s(X)·s̄(Y⁻¹) → C₀₀ = ${f(R.C4[0][0],6)}</div><p>Paper, Thm 3.12. The toy decrypts the four-part ciphertext directly. The scheme relinearizes it with key-switching keys from s̄(Y⁻¹) and s(X)·s̄(Y⁻¹) to s(X) (§3.5).</p>`,
+  explain:()=>`<p>Attention multiplies two encrypted matrices, the queries and the keys. In CKKS this ciphertext × ciphertext case is the most expensive one, because it combines rotations with relinearization.</p><p>In GL the same trace trick applies to all four combinations of ciphertext halves. The new ingredient is a mirrored key. The right-hand operand enters as conj(v)(Y⁻¹, Z⁻¹), so its key appears as s̄(Y⁻¹), a polynomial in Y. The four parts decrypt with 1, s(X), s̄(Y⁻¹) and their product, and the toy confirms we recover the same 0.25.</p><p>To continue computing, the scheme switches the two "foreign" key terms back to s(X). This is the paper's matrix relinearization, which costs about two to four Hadamard key switches. The BigSwitch follow-up below shrinks those keys.</p>` },
+{ key:"2026 follow-ups", who:"both", whoT:"research", at:0, budget:3, scale:"—", err:()=>0,
+  title:"Where the scheme went next",
+  cap:()=>`In one year GL gained its own bootstrapping, smaller keys and a GPU Transformer framework. All points below are cited from the papers, not computed here.`,
+  scene(){ const items=[["2025/1935","GL scheme","native matrix ⊛; 16 × 256² matrices: 3.32 s matmul key switch vs 1.17 s Hadamard"],
+      ["2025/972","Matrix-ring BGV/BFV/CKKS","generalizes the three classic schemes to matrix plaintexts"],
+      ["2026/811","Low-depth bootstrapping","shallower bootstrapping for matrix-native FHE"],
+      ["2026/956","GL bootstrapping","CoeffToSlot / SlotToCoeff as pt × ct matrix products: constant key switches per step"],
+      ["2026/2058","Trace-Factored BigSwitch","removes the product-secret evaluation key"],
+      ["2026/1870","Terrazzo","GPU framework fitting GL Transformer inference on a commodity GPU"]];
+    let g=`<line x1="120" y1="30" x2="120" y2="${30+items.length*46}" stroke="currentColor" opacity=".3" stroke-width="2"/>`;
+    items.forEach(([id,t,d],i)=>{ const y=40+i*46; g+=`<g class="ev"><g class="${i===0?"c-client":"c-server"}"><circle cx="120" cy="${y}" r="7" fill="currentColor"/></g><text x="104" y="${y+4}" text-anchor="end" font-size="12" class="mono" fill="currentColor">${id}</text><text x="140" y="${y+4}" font-size="14" font-weight="700" fill="currentColor">${t}</text><text x="140" y="${y+21}" font-size="12" fill="currentColor" class="c-muted">${d}</text></g>`; });
+    return svg(320,g,"Timeline of the Gentry–Lee scheme and its 2025–2026 follow-ups on bootstrapping, keys and GPU implementation."); },
+  play(){ slide(".ev",-20,0,0,150); },
+  math:()=>`<p>Sources: <a href="https://eprint.iacr.org/2025/1935">2025/1935</a>, <a href="https://eprint.iacr.org/2025/972">2025/972</a>, <a href="https://eprint.iacr.org/2026/811">2026/811</a>, <a href="https://eprint.iacr.org/2026/956">2026/956</a>, <a href="https://eprint.iacr.org/2026/2058">2026/2058</a>, <a href="https://eprint.iacr.org/2026/1870">2026/1870</a>. The timing figures are quoted from the GL paper's introduction.</p>`,
+  explain:()=>`<p>A scheme is only practical for LLMs if it can bootstrap and if its keys fit in memory. In 2026 both gaps started to close. Crockett, Gentry, Kim, Lee and Lee noticed that the linear parts of bootstrapping, CoeffToSlot and SlotToCoeff, are matrix products, which GL does natively. Their bootstrapping needs only a small constant number of key switches per step. A second paper reduces the depth of bootstrapping for matrix-native FHE.</p><p>Keys were the other problem. Each trace product produces a four-part ciphertext whose switch back needs a large "product-secret" key. Trace-Factored BigSwitch removes that key entirely by factoring it through two cheaper switches.</p><p>Terrazzo shows the engineering side. A direct GPU implementation would need terabytes of memory even for small language models. Co-designing the cryptography with the kernels brings private Transformer inference with GL onto one commodity GPU. Mali's matrix-ring paper generalizes the idea to BGV, BFV and CKKS.</p>` }
+];
+function A_bars(){ pop(".cb",0,50); pop(".ca",300,50); pop(".lock",700); slide(".ce",0,-20,1000,60); }
+const cfg={ id:"gentry-lee", title:"Gentry–Lee Step by Step", compute, setup:()=>G.keygen(),
+  inputNote:"Change x and every ciphertext is recomputed. Keep |z| ≤ 1 for the ReLU polynomial.",
+  status:{budgetLabel:"Levels left", budgetCells:3, scaleLabel:"Scale"},
+  footer:'Real toy Gentry–Lee (p = 1, n = 2): Gaussian-integer coefficients mod q = 2⁹⁰, Δ = 2²⁰, ternary Gaussian key, secret-key encryption. Simplified: relinearization after ciphertext products is replaced by decrypting with the extended key. Scheme: Gentry, Lee, <a href="https://eprint.iacr.org/2025/1935">IACR ePrint 2025/1935</a>.',
+  cardResult:()=>`${f(R.vy)} for a true ${f(R.relu)} (same ReLU gap as CKKS)`,
+  steps };
+steps.push(LS.cardStep(cfg,{budget:1,name:"Gentry–Lee",err:()=>Math.abs(R.vy-R.relu),
+  math:()=>`<p>Toy parameters: n = 2 matrices of size 2 × 2, p = 1, q = 2⁹⁰, Δ = 2²⁰. Real parameters batch φ(p) matrices per ciphertext over Z_q[X]/Φ₄ₙₚ(X).</p>`}));
+LS.start(cfg);
+})();
+</script>
+</body>
+</html>

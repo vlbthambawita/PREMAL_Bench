@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BFV Step by Step</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lesson.css">
+</head>
+<body>
+<div id="app"></div>
+<script src="lessons.js"></script>
+<script src="cards/bfv.js"></script>
+<script src="lesson.js"></script>
+<script src="engines/bfv.js"></script>
+<script src="engines/ckks.js"></script>
+<script>
+(function(){
+"use strict";
+const {svg,tile,lock,lbl,small,arrow,pop,fade,draw,slide,blink,growX,countUp,f,fe,big}=LS;
+const t=257n, QB=200, E=BFV.make({N:4,t,qBits:QB}), RC=EXACT.reluCoeffs(t);
+const SX=10, SW=4, SB=SX*SW;               /* integer encodings: x×10, w×4, b×40 */
+let R;
+const sgn=v=>LS.big(v);
+const bitsOf=v=>LS.bits(v);
+
+/* the CKKS pipeline of lesson 1, run here for the side-by-side comparison */
+function ckksRun(x){ const C=CKKS.make({N:4,deltaBits:20,q0Bits:30,levels:3,pBits:100}); C.keygen();
+  const ct=C.encrypt(C.encode(x)), c4=C.rescale(C.mulPt(ct,C.encode(LS.W))), c5=C.add(c4,C.rotate(c4,1));
+  const z=C.addPt(c5,C.encode([LS.B,LS.B])), zz=C.rescale(C.mulCt(z,z)), tt=C.rescale(C.mulPt(zz,C.cst(0.46875))), u=C.down(C.rescale(C.mulPt(z,C.cst(0.5))));
+  return C.val(C.addPt(C.add(tt,u),C.cst(0.09375)))[0]; }
+
+function compute(inp){
+  const x=[inp.x1,inp.x2], xi=x.map(v=>BigInt(Math.round(v*SX))), wi=LS.W.map(v=>BigInt(Math.round(v*SW))), bi=BigInt(Math.round(LS.B*SB));
+  const nn=LS.neuron(x);
+  const zi=xi[0]*wi[0]+xi[1]*wi[1]+bi, zs=LS.cmod(zi,t), reluI=zs>0n?zs:0n;
+  const slotsX=[xi[0],xi[1],xi[0],xi[1]], m=E.encode(slotsX);
+  const ct=E.encrypt(m), ph=E.phase(ct);
+  const c4=E.mulPlain(ct,E.encode([wi[0],wi[1],wi[0],wi[1]])), rot=E.rotate(c4), sum=E.add(c4,rot), cz=E.addPlain(sum,E.encode([bi,bi,bi,bi]));
+  const t0=Date.now(), ev=EXACT.evalPoly(E,cz,RC), ms=Date.now()-t0;
+  const yv=E.decrypt(ev.ct)[0];
+  const tree=[1,2,4,8,16,32,64,128,256].map((k,j)=>({k,depth:j,val:E.decrypt(ev.pw[k])[0],budget:E.budget(ev.pw[k])}));
+  const pts=[]; for(let a=-128;a<=128;a+=2) pts.push([a, Number(EXACT.evalPlain(RC,LS.mod(BigInt(a),t),t))]);
+  R={x,nn,xi,wi,bi,zi,zs,reluI,slotsX,m,ct,ph,dm:E.decrypt(ct),
+     b0:E.budgetMax(), b3:E.budget(ct), n3:E.noise(ct), v4:E.decrypt(c4), b4:E.budget(c4), n4:E.noise(c4),
+     vr:E.decrypt(rot), v5:E.decrypt(sum), vz:E.decrypt(cz), bz:E.budget(cz), nz:E.noise(cz),
+     ev, ms, yv, by:E.budget(ev.ct), ny:E.noise(ev.ct), tree, pts, y:Number(yv)/SB,
+     bars0:ct.c[0].map(v=>Number(LS.mod(v,E.q)*1000n/E.q)/1000), bars1:ct.c[1].map(v=>Number(LS.mod(v,E.q)*1000n/E.q)/1000),
+     ok:yv===reluI, ckks:ckksRun(x)};
+  return R;
+}
+
+/* register: bit layout of one decrypted coefficient (left = bit 199) */
+function reg(x,y,w,h,noiseBits,label,cls){ const tot=QB, px=w/tot, msgLo=tot-9, nW=Math.max(3,noiseBits*px);
+  return `<g class="${cls||""}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="none" stroke="currentColor"/>
+    <g class="c-client"><rect x="${x}" y="${y}" width="${(tot-msgLo)*px}" height="${h}" fill="currentColor" opacity=".45"/></g>
+    <g class="c-noise"><rect class="nz" x="${x+w-nW}" y="${y}" width="${nW}" height="${h}" fill="currentColor" opacity=".8"/></g>
+    <rect x="${x+(tot-msgLo)*px}" y="${y}" width="${w-(tot-msgLo)*px-nW}" height="${h}" fill="currentColor" opacity=".05"/>
+    <text x="${x+(tot-msgLo)*px+(w-(tot-msgLo)*px-nW)/2}" y="${y+h/2+5}" text-anchor="middle" font-size="12.5" fill="currentColor">${label}</text></g>`; }
+
+const steps=[
+{ key:"Example", who:"both", whoT:"the task", at:0, budget:"—", scale:"×10, ×4, ×40", err:()=>0,
+  title:"The same neuron, in whole numbers",
+  cap:()=>`BFV only computes on integers. Scale x by 10 and w by 4, and the bias by 40. Then 40·z = <b>${big(R.zi)}</b> is an integer, and dividing by 40 at the end gives z exactly.`,
+  scene(){ return svg(330,`
+    <g class="c-client"><rect x="20" y="20" width="200" height="290" rx="10" fill="currentColor" fill-opacity=".06" stroke="currentColor" stroke-dasharray="5 5"/>${lbl(40,48,"CLIENT","font-weight=\"700\"")}</g>
+    <g class="c-server"><rect x="250" y="20" width="400" height="290" rx="10" fill="currentColor" fill-opacity=".06" stroke="currentColor" stroke-dasharray="5 5"/>${lbl(270,48,"SERVER","font-weight=\"700\"")}</g>
+    <g class="c-client"><rect x="670" y="20" width="110" height="290" rx="10" fill="currentColor" fill-opacity=".06" stroke="currentColor" stroke-dasharray="5 5"/>${lbl(690,48,"CLIENT","font-weight=\"700\"")}</g>
+    <g class="c-server">
+      <path class="edge" pathLength="1" stroke-dasharray="1" d="M152,115 C260,115 300,170 396,170" fill="none" stroke="currentColor" stroke-width="3"/>
+      <path class="edge" pathLength="1" stroke-dasharray="1" d="M152,235 C260,235 300,170 396,170" fill="none" stroke="currentColor" stroke-width="3"/>
+      <path class="edge" pathLength="1" stroke-dasharray="1" d="M464,170 L530,170" fill="none" stroke="currentColor" stroke-width="3"/>
+      <path class="edge" pathLength="1" stroke-dasharray="1" d="M620,170 L686,170" fill="none" stroke="currentColor" stroke-width="3" marker-end="url(#ahs)"/>
+      <text class="wl" x="262" y="114" font-size="14" fill="currentColor">4·w₁ = ${big(R.wi[0])}</text>
+      <text class="wl" x="262" y="250" font-size="14" fill="currentColor">4·w₂ = ${big(R.wi[1])}</text>
+      <circle class="anim node" cx="430" cy="170" r="34" fill="var(--panel)" stroke="currentColor" stroke-width="3"/>
+      <text class="anim node" x="430" y="166" text-anchor="middle" font-size="20" font-weight="700" fill="currentColor">Σ</text>
+      <text class="anim node" x="430" y="186" text-anchor="middle" font-size="12" fill="currentColor">+ 40·b = ${big(R.bi)}</text>
+      <rect class="anim node" x="530" y="140" width="90" height="60" rx="8" fill="var(--panel)" stroke="currentColor" stroke-width="3"/>
+      <polyline class="anim node" points="548,185 575,185 602,152" fill="none" stroke="currentColor" stroke-width="3"/>
+      <text class="wl" x="497" y="158" text-anchor="middle" font-size="13" fill="currentColor">${big(R.zi)}</text>
+      ${small(575,220,"ReLU on integers",'text-anchor="middle"')}
+    </g>
+    <g class="c-client">
+      <circle class="anim node" cx="120" cy="115" r="32" fill="var(--panel)" stroke="currentColor" stroke-width="3"/><text class="anim node mono" x="120" y="120" text-anchor="middle" font-size="16" fill="currentColor">${big(R.xi[0])}</text>
+      <circle class="anim node" cx="120" cy="235" r="32" fill="var(--panel)" stroke="currentColor" stroke-width="3"/><text class="anim node mono" x="120" y="240" text-anchor="middle" font-size="16" fill="currentColor">${big(R.xi[1])}</text>
+      ${small(120,166,"10·x₁ (x₁ = "+R.x[0]+")",'text-anchor="middle"')}${small(120,286,"10·x₂ (x₂ = "+R.x[1]+")",'text-anchor="middle"')}
+      <circle class="anim yv" cx="725" cy="170" r="34" fill="currentColor" fill-opacity=".15" stroke="currentColor" stroke-width="3"/><text class="anim yv mono" x="725" y="176" text-anchor="middle" font-size="17" font-weight="700" fill="currentColor">${big(R.reluI)}</text>
+      ${small(725,226,"÷ 40 = "+f(Number(R.reluI)/SB),'text-anchor="middle"')}
+    </g>
+    ${small(400,300,"every value is an integer mod t = 257, kept in (−128, 128]",'text-anchor="middle"')}`,"The neuron with integer inputs 10x, integer weights 4w and integer bias 40b; the output divided by 40 is y."); },
+  play(){ pop(".node",0,60); draw(".edge",350,700); fade(".wl",900); pop(".yv",1500); },
+  math:()=>`<div class="formula">40·z = (10x₁)(4w₁) + (10x₂)(4w₂) + 40b = ${big(R.xi[0])}·${big(R.wi[0])} + ${big(R.xi[1])}·(${big(R.wi[1])}) + ${big(R.bi)} = ${big(R.zi)}</div><div class="formula">y = ReLU(40z)/40 = ${big(R.reluI)}/40 = ${f(Number(R.reluI)/SB)}</div><p>Inputs are rounded to one decimal (×10) and weights to quarters (×4). The plaintext modulus t = 257 means every value lives in the range −128 to 128, which is enough for this neuron.</p>`,
+  explain:()=>`<p>CKKS computes with approximate real numbers. BFV, like its sibling BGV, computes <b>exactly</b>, but only on integers modulo a <b>plaintext modulus t</b>. Here t = 257, a prime.</p><p>To run our neuron we use fixed-point integers. The input is multiplied by 10, the weights by 4, and the bias by 40, so the products and the bias share the same scale of 40. The result 40·z = ${big(R.zi)} is an integer, and the client divides by 40 after decryption.</p><p>Everything is exact as long as no intermediate value leaves the range −128…128. If it does, it wraps around modulo 257, like an integer overflow. Choosing t large enough for the whole computation is the BFV version of choosing CKKS's scale.</p>`},
+{ key:"Keys", who:"client", whoT:"client", at:0, budget:"—", scale:"t = 257", err:()=>0,
+  title:"Make keys",
+  cap:()=>`Same idea as CKKS: a tiny secret polynomial s, plus public, relinearization and rotation keys. The modulus is q = 2²⁰⁰, and the plaintext modulus is t = 257.`,
+  scene(){ const tiles=E.K.s.map((c,i)=>tile(40+i*62,110,54,54,big(c),"c-client","sk")).join("");
+    const key=(y,name,sub)=>`<g class="c-server keyg"><rect x="470" y="${y}" width="290" height="58" rx="8" fill="currentColor" fill-opacity=".08" stroke="currentColor" stroke-width="2"/>${LS.keyIcon(497,y+29)}<text x="545" y="${y+25}" font-size="14" font-weight="700" fill="currentColor">${name}</text><text x="545" y="${y+44}" font-size="12" fill="currentColor" class="c-muted">${sub}</text></g>`;
+    return svg(320,`${lbl(40,60,"SECRET KEY  s(X)","class=\"c-client\" font-weight=\"700\"")}${small(40,80,"coefficients in {−1, 0, 1}")}${tiles}
+      ${["s₀","s₁","s₂","s₃"].map((t,i)=>small(67+i*62,186,t,'text-anchor="middle"')).join("")}
+      ${lock(152,206)}${small(175,220,"never sent")}
+      <line x1="320" y1="30" x2="320" y2="300" stroke="currentColor" stroke-dasharray="4 6" opacity=".5"/>${small(330,292,"network")}
+      <g class="c-muted"><path class="flow" pathLength="1" stroke-dasharray="1" d="M290,137 C360,137 380,70 462,70" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#ahm)"/>
+      <path class="flow" pathLength="1" stroke-dasharray="1" d="M290,137 L462,150" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#ahm)"/>
+      <path class="flow" pathLength="1" stroke-dasharray="1" d="M290,137 C360,137 380,230 462,230" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#ahm)"/></g>
+      ${key(40,"public key","(−a·s + e, a) mod q")}${key(120,"relinearization key","encrypts s² · fixes ct × ct")}${key(200,"rotation key","encrypts s(X⁵) · swaps slots")}`,"The secret key stays with the client; public, relinearization and rotation keys go to the server."); },
+  play(){ LS.A(".sk",[{opacity:0,transform:"scaleY(0)"},{opacity:1,transform:"scaleY(1)"}],{s:110,d:500}); pop(".lock",600); draw(".flow",800,600); slide(".keyg",-120,0,1100,160); },
+  math:()=>`<div class="formula">s(X) = ${LS.poly.str(E.K.s)}</div><div class="formula">q = 2²⁰⁰,  t = 257,  Δ = ⌊q/t⌋ ≈ 2^${(Math.log2(Number(E.D))).toFixed(1)}</div><p>Key generation is identical to CKKS. Only the meaning of the message inside the ciphertext changes.</p>`,
+  explain:()=>`<p>BFV keys look exactly like CKKS keys: a small secret polynomial s, a public key built from Ring-LWE, and evaluation keys for relinearization and rotation. The security assumption is the same, so BFV is also believed to resist quantum attacks.</p><p>The difference is the extra parameter t. The ciphertext modulus q is huge (2²⁰⁰ here) and the plaintext modulus t is small (257). The ratio Δ = ⌊q/t⌋ decides where the message sits inside a ciphertext, as the next steps show.</p><p>We use a much larger q than in the CKKS lesson. The reason is ReLU, which BFV will compute exactly, but at a depth that needs a lot of room for noise.</p>`},
+{ key:"Encode", who:"client", whoT:"client", at:0, budget:"—", scale:"slots mod 257", err:()=>0,
+  title:"Encode: four slots modulo 257",
+  cap:()=>`Because 257 ≡ 1 (mod 8), the polynomial ring splits into 4 slots. We put x₁, x₂ in two slots and copy them into the other two, so rotation can swap them later.`,
+  scene(){ const r=E.slots.roots.map(String);
+    return svg(330,`${small(40,36,"SLOTS (integers mod 257)")}
+      ${R.slotsX.map((v,i)=>`<g class="sl">${tile(40+i*92,48,84,50,big(v),"c-client")}</g>`).join("")}
+      ${R.slotsX.map((v,i)=>small(82+i*92,116,"m("+r[i]+")",'text-anchor="middle"')).join("")}
+      <g class="c-muted ar2"><path d="M40,126 v8 h360 v-8 M220,134 V176" fill="none" stroke="currentColor" stroke-width="2" marker-end="url(#ahm)"/><path d="M40,192 v-8 h360 v8" fill="none" stroke="currentColor" stroke-width="2"/></g>
+      ${small(232,160,"inverse NTT mod 257")}
+      ${R.m.map((c,i)=>`<g class="co">${tile(40+i*92,200,84,50,big(c),"c-client")}</g>`).join("")}
+      ${["m₀","m₁","m₂","m₃"].map((t,i)=>small(82+i*92,268,t,'text-anchor="middle"')).join("")}
+      <g class="c-muted"><rect x="440" y="40" width="330" height="230" rx="8" fill="none" stroke="currentColor" stroke-dasharray="4 4"/></g>
+      ${lbl(456,64,"Roots of X⁴ + 1 modulo 257","font-weight=\"700\"")}
+      ${r.map((v,i)=>`<g class="rt">${lbl(456,94+i*28,`ζ${["","⁵","⁷","³"][i]} = ${v}`,'class="mono"')}${lbl(590,94+i*28,`m(${v}) ≡ ${big(R.slotsX[i])}`,'class="mono c-client"')}</g>`).join("")}
+      ${small(456,214,`ζ = ${E.slots.zeta} has order 8 mod 257: ${E.slots.zeta}⁴ ≡ ${big(LS.cmod(LS.powmod(E.slots.zeta,4n,t),t))}`)}
+      ${small(456,234,"X → X⁵ maps ζ ↔ ζ⁵ and ζ⁷ ↔ ζ³: the slots swap in pairs")}
+      ${small(40,300,"Unlike CKKS there is no scale Δ here: the slot values are the integers themselves.")}`,"Four integer slots become four polynomial coefficients through an inverse number-theoretic transform modulo 257."); },
+  play(){ pop(".sl",0,90); fade(".ar2",500); slide(".co",0,-40,800,90); fade(".rt",1300,150); },
+  math:()=>`<div class="formula">m(X) = ${LS.poly.str(R.m)}   (coefficients mod 257)</div><div class="formula">m(${E.slots.roots[0]}) mod 257 = ${big(E.decodeSlots(R.m)[0])},  m(${E.slots.roots[1]}) mod 257 = ${big(E.decodeSlots(R.m)[1])}</div><p>The four roots of X⁴ + 1 modulo 257 are the odd powers of ζ = 4. Evaluating at them is a ring isomorphism Z₂₅₇[X]/(X⁴+1) ≅ Z₂₅₇⁴ (the Chinese remainder theorem), so polynomial products are slot-wise products.</p>`,
+  explain:()=>`<p>BFV packing works like CKKS packing, but over a finite field instead of the complex numbers. When t ≡ 1 mod 2N, the polynomial X^N + 1 factors completely modulo t. Each factor gives one slot, and multiplying polynomials multiplies all slots at once.</p><p>Here N = 4 and t = 257, so we get N = 4 slots. That is twice the N/2 of CKKS, because there are no complex conjugates to waste: every root is a separate integer slot.</p><p>The values are exact integers modulo 257. Nothing is rounded during encoding, unlike CKKS's multiplication by Δ.</p>`},
+{ key:"Encrypt", who:"client", whoT:"client", at:0.5, budget:()=>`${R.b3} bits`, scale:"Δ = ⌊q/t⌋", err:()=>0,
+  title:"Encrypt: the message goes to the top bits",
+  cap:()=>`BFV multiplies the message by Δ = ⌊q/t⌋, putting it in the highest bits, with the noise at the bottom. The gap between them is the <b>noise budget</b>: ${R.b3} bits here.`,
+  scene(){ const nb=bitsOf(R.n3);
+    return svg(330,`${lbl(40,40,"c₀ + c₁·s  =  Δ·m + v   (mod q)","class=\"mono\" font-weight=\"700\"")}
+      ${small(40,62,"one decrypted coefficient, bit 199 on the left → bit 0 on the right")}
+      <g class="rg">${reg(40,74,720,46,nb,"noise budget: "+R.b3+" bits")}</g>
+      <g class="c-client">${small(40,140,"Δ·m: the top ≈ 8 bits",'class="c-client"')}</g>
+      <text x="760" y="140" text-anchor="end" font-size="11.5" fill="currentColor" class="c-noise">noise v: ${nb} bits</text>
+      ${lbl(40,182,"Decrypt: multiply by t/q and round → the slots come back exactly","font-weight=\"700\"")}
+      ${R.dm.map((v,i)=>`<g class="dm">${tile(40+i*92,196,84,46,big(v),"c-client")}</g>`).join("")}
+      ${small(40,264,"For comparison, in CKKS the message sat just above the noise at the bottom,")}
+      ${small(40,282,"with free headroom above it. In BFV the message is pinned at the top and the noise grows up towards it.")}
+      <g class="c-muted"><line x1="430" y1="196" x2="430" y2="250" stroke="currentColor" opacity=".3"/></g>
+      ${R.bars0.map((v,i)=>`<g class="c-client"><rect class="bar" style="transform-box:fill-box;transform-origin:bottom" x="${460+i*36}" y="${240-v*60}" width="26" height="${v*60+2}" rx="2" fill="currentColor" fill-opacity=".55"/></g>`).join("")}
+      ${R.bars1.map((v,i)=>`<g class="c-client"><rect class="bar" style="transform-box:fill-box;transform-origin:bottom" x="${620+i*36}" y="${240-v*60}" width="26" height="${v*60+2}" rx="2" fill="currentColor" fill-opacity=".55"/></g>`).join("")}
+      ${small(460,262,"c₀ coefficients")}${small(620,262,"c₁ coefficients")}${small(460,196,"look uniformly random")}`,"A bit register shows the message in the top bits and noise in the bottom bits with the noise budget between; decryption returns the four slot values exactly."); },
+  play(){ fade(".rg",0); A_grow(); pop(".dm",900,90); LS.A(".bar",[{transform:"scaleY(.1)"},{transform:"scaleY(1.2)"},{transform:"scaleY(1)"}],{t:300,s:50,d:900}); },
+  math:()=>`<div class="formula">c₀ = [ ${R.ct.c[0].map(v=>LS.hex(v,E.q)).join(", ")} ]</div><div class="formula">c₁ = [ ${R.ct.c[1].map(v=>LS.hex(v,E.q)).join(", ")} ]</div><div class="formula">noise |v| = ${big(R.n3)}  →  budget = log₂(Δ/2) − log₂|v| = ${R.b3} bits (of ${R.b0})</div><p>Decryption computes round(t·(c₀ + c₁·s)/q) mod t. It is exact as long as |v| < Δ/2.</p>`,
+  explain:()=>`<p>BFV encrypts Δ·m with Δ = ⌊q/t⌋ ≈ 2^${Math.log2(Number(E.D)).toFixed(0)}. The message therefore occupies the top bits of every coefficient. The fresh noise v is a few units and sits in the lowest bits.</p><p>Decryption scales by t/q and rounds. This is the same as reading the top bits, and it gives the integers back <b>exactly</b>, because the noise is far too small to change the rounding. The client sees ${R.dm.map(big).join(", ")} with no error at all.</p><p>The <b>noise budget</b> is the number of bits between the top of the noise and the bottom of the message. Every operation spends some of it. When it reaches zero, decryption fails. The budget is BFV's version of CKKS levels, but BFV never rescales: the message always stays at the top.</p>`},
+{ key:"× w", who:"server", whoT:"server", at:1, budget:()=>`${R.b4} bits`, scale:"Δ (unchanged)", err:()=>0,
+  title:"Multiply by the weights: no rescale needed",
+  cap:()=>`Slot-wise × [${R.wi.map(big).join(", ")}] gives exactly [${R.v4.slice(0,2).map(big).join(", ")}]. The message stays at Δ, only the noise grows: the budget falls from ${R.b3} to ${R.b4} bits.`,
+  scene(){ const enc=(x,y,t)=>`${tile(x,y,84,50,t,"c-client")}${lock(x+64,y+6)}`;
+    return svg(320,`${small(40,32,"ENCRYPTED SLOTS")}${R.slotsX.map((v,i)=>enc(40+i*92,42,big(v))).join("")}
+      <text x="420" y="73" font-size="26" fill="currentColor" text-anchor="middle" class="op">×</text>
+      ${small(450,32,"PLAINTEXT WEIGHTS")}${[0,1,2,3].map(i=>`<g class="wt">${tile(450+i*80,42,72,50,big(R.wi[i%2]),"c-server")}</g>`).join("")}
+      ${small(40,124,"RESULT (decrypted)")}${R.v4.map((v,i)=>`<g class="res">${tile(40+i*92,134,84,46,big(v),"c-client")}</g>`).join("")}
+      <text x="430" y="164" font-size="13" fill="currentColor" class="c-ok">exact, no rounding</text>
+      ${lbl(40,214,"Noise budget before and after","font-weight=\"700\"")}
+      <g class="rA">${reg(40,226,720,30,bitsOf(R.n3),R.b3+" bits")}</g>
+      <g class="rB">${reg(40,268,720,30,bitsOf(R.n4),R.b4+" bits")}</g>
+      ${small(40,312,"message pinned at the top · noise creeps up from the bottom")}`,"Encrypted slots times plaintext weights give exact products; two bit registers show the noise growing while the message stays at the top."); },
+  play(){ slide(".wt",0,-40,0,80); fade(".op",300); pop(".res",700,90); fade(".rA",1100); slide(".rB",0,-30,1500); },
+  math:()=>`<div class="formula">slots × [${R.wi.map(big).join(", ")}] = [${R.v4.map(big).join(", ")}]</div><div class="formula">noise ${big(R.n3)} → ${big(R.n4)}   budget ${R.b3} → ${R.b4} bits</div><p>Plaintext × ciphertext multiplies the noise by roughly the size of the plaintext polynomial's coefficients, which cost here about ${R.b3-R.b4} bits.</p>`,
+  explain:()=>`<p>The server encodes its integer weights into slots and multiplies them into the ciphertext. Because the encoding is a ring isomorphism, every slot is multiplied by its own weight, and the products ${R.v4.slice(0,2).map(big).join(" and ")} come out exactly.</p><p>In CKKS this step doubled the scale to Δ² and forced a rescale that cost one level. BFV has no scale to manage: the result still decrypts with the same Δ. What grows is the noise, which was multiplied by the size of the weight polynomial. The budget dropped by ${R.b3-R.b4} bits.</p><p>BFV has no fixed number of levels. As long as the budget lasts, any sequence of additions and multiplications works. Its size is chosen from q and t at setup time.</p>`},
+{ key:"Rotate + add", who:"server", whoT:"server", at:1, budget:()=>`${R.bz} bits`, scale:"Δ", err:()=>0,
+  title:"Rotate, add, add the bias: exactly 40·z",
+  cap:()=>`Rotation swaps slot pairs, adding gives w₁x₁ + w₂x₂, and adding 40b gives 40·z = <b>${big(R.vz[0])}</b> in every slot, with no error at all.`,
+  scene(){ const row=(y,v,cls,name,extra="")=>`<g class="${cls}">${v.map((x,i)=>tile(250+i*100,y,90,46,big(x),"c-server")).join("")}</g>${lbl(40,y+29,name)}${extra}`;
+    return svg(340,`${row(24,R.v4,"r1","ct (x ⊙ w)")}
+      <g class="c-server sw"><line x1="300" y1="74" x2="390" y2="104" stroke="currentColor" stroke-width="2" marker-end="url(#ahs)"/><line x1="390" y1="74" x2="300" y2="104" stroke="currentColor" stroke-width="2" marker-end="url(#ahs)"/>
+      <line x1="500" y1="74" x2="590" y2="104" stroke="currentColor" stroke-width="2" marker-end="url(#ahs)"/><line x1="590" y1="74" x2="500" y2="104" stroke="currentColor" stroke-width="2" marker-end="url(#ahs)"/></g>
+      ${row(110,R.vr,"r2","rotate(ct)")}
+      <text class="pl" x="226" y="214" font-size="24" fill="currentColor" text-anchor="middle">+</text>
+      ${row(186,R.v5,"r3","ct + rotate(ct)")}
+      <g class="bias">${tile(400,246,140,32,"+ 40·b = "+big(R.bi),"c-server","",14)}</g>
+      ${row(290,R.vz,"r4","40·z")}`,"The product slots are rotated so pairs swap, added to the original, and the bias is added, giving 40z in every slot."); },
+  play(){ fade(".r1",0); fade(".sw",400); slide(".r2",0,-60,600,0); fade(".pl",1300); pop(".r3",1500,0); slide(".bias",0,-30,2000); pop(".r4",2400,0); },
+  math:()=>`<table class="nums"><thead><tr><th>after</th><th>slots</th><th>budget</th></tr></thead><tbody>
+    <tr><td>rotate(ct)</td><td class="v">[${R.vr.map(big).join(", ")}]</td><td class="v">${E.budget(E.rotate(E.mulPlain(R.ct,E.encode([R.wi[0],R.wi[1],R.wi[0],R.wi[1]]))))} bits</td></tr>
+    <tr><td>ct + rotate(ct)</td><td class="v">[${R.v5.map(big).join(", ")}]</td><td class="v">—</td></tr>
+    <tr><td>+ 40·b</td><td class="v">[${R.vz.map(big).join(", ")}]</td><td class="v">${R.bz} bits</td></tr></tbody></table>`,
+  explain:()=>`<p>Rotation works exactly as in CKKS: substitute X → X⁵ and key-switch back to s. With 4 integer slots the automorphism swaps slots 1↔2 and 3↔4, which is why we stored x₁, x₂ twice.</p><p>After adding the rotated copy and the encoded bias, every slot holds 40·z = ${big(R.vz[0])}. This is the exact integer. CKKS gave 0.35 plus an error of about 10⁻⁶ at this point. BFV gives no error, because the noise never reaches the message bits.</p><p>The linear half of the neuron is where BFV and CKKS are most alike. The real difference appears at the non-linear step.</p>`},
+{ key:"ReLU", who:"server", whoT:"server", at:1, budget:()=>`${R.by} bits`, scale:"Δ", err:()=>0,
+  title:"ReLU exactly: a degree-256 polynomial",
+  cap:()=>`Over Z₂₅₇ every function is a polynomial, so ReLU is too, exactly, but it has degree 256. Evaluating it takes <b>${R.ev.mults}</b> ciphertext multiplications at depth <b>${R.ev.depth}</b>.`,
+  scene(){ const P=LS.plot(50,420,236,40,-128,128,-10,135);
+    const dots=R.pts.map(([a,v])=>`<circle cx="${P.sx(a).toFixed(1)}" cy="${P.sy(v>128?v-257:v).toFixed(1)}" r="2.6" fill="currentColor"/>`).join("");
+    const zz=Number(R.zs);
+    const cbars=RC.slice(1).map((c,i)=>{ const v=Number(LS.cmod(c,t)); const x=50+i*(370/256), h=Math.abs(v)/128*30; return `<rect x="${x.toFixed(1)}" y="${(v>=0?300-h:300).toFixed(1)}" width="1.1" height="${h.toFixed(1)}" fill="currentColor"/>`; }).join("");
+    const tr=R.tree, bx=470, bw=290;
+    return svg(360,`${lbl(50,26,"f(a) for every integer a in (−128, 128]","font-weight=\"700\"")}
+      <line x1="50" y1="${P.sy(0)}" x2="420" y2="${P.sy(0)}" stroke="currentColor" opacity=".35"/><line x1="${P.sx(0)}" y1="40" x2="${P.sx(0)}" y2="250" stroke="currentColor" opacity=".35"/>
+      ${small(P.sx(-128),P.sy(0)+16,"−128",'text-anchor="middle"')}${small(P.sx(128),P.sy(0)+16,"128",'text-anchor="middle"')}
+      <g class="c-server pts">${dots}</g>
+      <g class="c-ok"><circle class="zp" cx="${P.sx(zz)}" cy="${P.sy(Number(R.reluI))}" r="6" fill="none" stroke="currentColor" stroke-width="2.5"/><text x="${P.sx(zz)-12}" y="${P.sy(Number(R.reluI))-12}" text-anchor="end" font-size="12.5" fill="currentColor">f(${big(R.zs)}) = ${big(R.reluI)}</text></g>
+      ${small(50,262,"its 256 coefficients mod 257 look random:")}
+      <g class="c-muted">${cbars}</g><line x1="50" y1="300" x2="420" y2="300" stroke="currentColor" opacity=".3"/>
+      ${lbl(bx,26,"Power tree: depth and noise budget","font-weight=\"700\"")}
+      ${tr.map((n,j)=>`<g class="tn">${lbl(bx,58+j*32,"z"+LS.sup(n.k),'class="mono"')}${small(bx+44,58+j*32,"depth "+j)}<g class="c-client"><rect x="${bx+100}" y="${46+j*32}" width="${200*n.budget/R.b0}" height="16" rx="2" fill="currentColor" fill-opacity=".35"/></g>${small(bx+106+200*n.budget/R.b0,58+j*32,n.budget+" bits")}</g>`).join("")}
+      ${small(bx,350,`each doubling of the degree costs ≈ ${Math.round((R.tree[1].budget-R.tree[8].budget)/7)} bits of budget`)}`,"Discrete points of the interpolated ReLU polynomial lie exactly on ReLU for every integer; its coefficients look random; a power tree shows the noise budget falling with depth."); },
+  play(){ LS.A(".pts circle",[{opacity:0},{opacity:1}],{s:6,d:200}); pop(".zp",900); growX(".tn rect",400,120); },
+  math:()=>`<div class="formula">f(X) = Σₐ ReLU(a)·(1 − (X − a)²⁵⁶)  mod 257  =  ${RC.slice(1,5).map((c,i)=>big(c)+"·X"+LS.sup(i+1)).join(" + ")} + … + (${big(RC[256])})·X²⁵⁶</div>
+    <table class="nums"><thead><tr><th>power</th><th>depth</th><th>slot value</th><th>budget</th></tr></thead><tbody>${R.tree.map(n=>`<tr><td>z${LS.sup(n.k)}</td><td class="v">${n.depth}</td><td class="v">${big(n.val)}</td><td class="v">${n.budget} bits</td></tr>`).join("")}</tbody></table>
+    <p>${R.ev.mults} ciphertext × ciphertext multiplications (each with relinearization), then 256 plaintext-scalar multiplications and additions. Measured here: ${R.ms} ms for N = 4.</p>`,
+  explain:()=>`<p>Over a finite field, <i>every</i> function is a polynomial. Fermat's little theorem gives (X − a)²⁵⁶ = 1 for X ≠ a and 0 for X = a, so 1 − (X − a)²⁵⁶ is an indicator of the point a. Summing ReLU(a) times these indicators gives a polynomial f that equals ReLU at every one of the 257 values, with no approximation.</p><p>The price is the degree. f has degree 256, and its coefficients look random, so no shortcut collapses it. Computing all powers z, z², …, z²⁵⁶ with a tree of squarings and products needs depth ⌈log₂ 256⌉ = 8 and ${R.ev.mults} ciphertext multiplications. CKKS used one multiplication and 3 levels for an approximate degree-2 ReLU.</p><p>Each depth step costs about ${Math.round((R.tree[1].budget-R.tree[8].budget)/7)} bits of noise budget here. With a realistic t of 16 to 20 bits, the degree would be 2¹⁶ or more, which is why exact BFV/BGV inference uses other tricks (lookup-table bootstrapping, digit decomposition, or switching schemes).</p>`},
+{ key:"Decrypt", who:"client", whoT:"client", at:0, budget:()=>`${R.by} bits`, scale:"÷ 40", err:()=>0,
+  title:"Decrypt: exactly 0.35",
+  cap:()=>`The client decrypts <b>${big(R.yv)}</b> and divides by 40: y = <b>${f(R.y)}</b>, exactly ReLU(z). The CKKS pipeline from Lesson 1, run on the same input here, gives ${f(R.ckks)}.`,
+  scene(){ const rows=[["CKKS (Lesson 1)",3,1,Math.abs(R.ckks-R.nn.relu)],["BFV (this lesson)",R.ev.depth,R.ev.mults,0]];
+    const X0=230, sc=v=>v/8*240, sm=v=>Math.log10(v+1)/Math.log10(256)*240;
+    return svg(330,`<g class="c-client big"><text x="40" y="58" font-size="13" fill="currentColor" font-weight="700">CLIENT DECRYPTS</text><text x="40" y="104" font-size="40" font-family="var(--mono)" fill="currentColor">${big(R.yv)} ÷ 40 = ${f(R.y)}</text></g>
+      <g class="c-ok big"><text x="520" y="58" font-size="13" fill="currentColor" font-weight="700">TRUE ReLU(z)</text><text x="520" y="104" font-size="40" font-family="var(--mono)" fill="currentColor">${f(R.nn.relu)}</text></g>
+      ${lbl(40,152,"Exactness costs depth","font-weight=\"700\"")}
+      ${small(X0,176,"depth (levels)")}${small(X0+280,176,"ct × ct multiplications (log scale)")}
+      ${rows.map((r,i)=>`${lbl(40,206+i*48,r[0])}<g class="${i?"c-server":"c-muted"}"><rect class="eb" x="${X0}" y="${190+i*48}" width="${sc(r[1])}" height="24" rx="3" fill="currentColor"/><text x="${X0+sc(r[1])+6}" y="${207+i*48}" font-size="12.5" fill="currentColor">${r[1]}</text>
+        <rect class="eb" x="${X0+280}" y="${190+i*48}" width="${sm(r[2])}" height="24" rx="3" fill="currentColor"/><text x="${X0+284+sm(r[2])}" y="${207+i*48}" font-size="12.5" fill="currentColor">${r[2]}</text></g>${small(40,224+i*48,"error "+(r[3]?fe(r[3]):"0"))}`).join("")}`,"The decrypted integer divided by 40 equals the true ReLU; bars compare CKKS and BFV depth and multiplication counts."); },
+  play(){ pop(".big",0,250); growX(".eb",700,150); },
+  math:()=>`<div class="formula">round(t·(c₀ + c₁·s)/q) mod 257 = ${big(R.yv)}   →   y = ${big(R.yv)}/40 = ${f(R.y,6)}</div><div class="formula">final noise ${LS.bits(R.ny)} bits, budget left ${R.by} of ${R.b0} bits</div><p>The CKKS figure is computed live by running Lesson 1's toy CKKS on the same x.</p>`,
+  explain:()=>`<p>Decryption returns the integer ${big(R.yv)}, and ${big(R.yv)}/40 = ${f(R.y)}. There is no encryption noise and no approximation error: BFV computed exactly ReLU on the fixed-point integers.</p><p>The comparison shows the trade-off. CKKS used 3 levels and one ciphertext multiplication but was off by ${fe(Math.abs(R.ckks-R.nn.relu))}. BFV used depth ${R.ev.depth} and ${R.ev.mults} multiplications to be exact. On real hardware and real parameters, depth drives the ciphertext size and every multiplication is expensive, so the exact route is rarely taken for LLMs.</p><p>Where exactness matters, for example integer-quantized layers, comparisons and argmax, BFV and BGV still shine, especially for the linear parts of interactive HE+MPC protocols such as Cheetah, BOLT and BumbleBee.</p>`}
+];
+function A_grow(){ LS.A(".rg .nz",[{transform:"scaleX(0)",transformOrigin:"right"},{transform:"scaleX(1)",transformOrigin:"right"}],{t:200,d:700}); }
+const cfg={ id:"bfv", title:"BFV Step by Step", compute, setup:()=>E.keygen(),
+  inputNote:"x is rounded to one decimal (×10). Keep |40·z| ≤ 128 so nothing wraps modulo 257.",
+  status:{budgetLabel:"Noise budget", scaleLabel:"Encoding", errLabel:"Error so far"},
+  footer:'Real toy BFV in your browser: N = 4, t = 257 (4 slots), q = 2²⁰⁰, key-switching modulus 2²²⁰, ternary secret. Insecure sizes, real algebra. Scheme: Brakerski (<a href="https://eprint.iacr.org/2012/078">CRYPTO 2012</a>), Fan–Vercauteren (<a href="https://eprint.iacr.org/2012/144">ePrint 2012/144</a>).',
+  cardResult:()=>`${big(R.yv)}/40 = ${f(R.y)}, exact`,
+  steps };
+steps.push(LS.cardStep(cfg,{name:"BFV",budget:()=>`${R.by} bits`,scale:"—",err:()=>0,
+  extra:()=>`<div class="next"><div><b>BGV</b><br>Same exact arithmetic, but the message sits in the low bits and noise is cut by modulus switching.</div><div><b>Generalized BFV</b><br>Trade slots for precision with a polynomial plaintext modulus.</div><div><b>TFHE</b><br>Exact ReLU by a lookup table, without a degree-256 polynomial.</div></div>`,
+  math:()=>`<p>Toy parameters: N = 4, t = 257, q = 2²⁰⁰. Real BFV uses N = 2¹³ to 2¹⁶, a 16–60-bit t and a q of hundreds of bits.</p>`,
+  explain:()=>`<p>BFV kept every value exact. The linear part cost little noise budget, but the exact ReLU needed a degree-256 polynomial and ${R.ev.mults} multiplications. Compare with CKKS's approximate degree-2 polynomial.</p>`}));
+LS.start(cfg);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Scheme Switching Step by Step</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lesson.css">
+<style>[hidden]{display:none!important}</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="lessons.js"></script>
+<script src="cards/switching.js"></script>
+<script src="lesson.js"></script>
+<script src="engines/tfhe.js"></script>
+<script>
+(function(){
+"use strict";
+const {svg,tile,lbl,small,arrow,pop,fade,draw,slide,blink,growX,f,sub,sup,big}=LS;
+const T=TFHE.make(), D=T.D, Q=TFHE.Q;
+const RELU=m=>Math.max(0,m-16), P2=v=>v.toFixed(1), lg=v=>v?Math.log2(Math.abs(v)).toFixed(1):"0";
+let RL, R;
+
+function compute(inp){
+  const x=[inp.x1,inp.x2], q=x.map(v=>Math.round(v*10)), m=2*q[0]-q[1]+20, inRange=m>=0&&m<T.p, nn=LS.neuron(x);
+  const xPoly=[q[0]*D,q[1]*D,0,0], wPoly=[2,0,0,1];               // w(X) = w₀ − w₁X³ with w = (2, −1)
+  const ct=RL.enc(xPoly), ph0=RL.phase(ct).map(v=>Math.round(TFHE.cen(v)/D));
+  const cw=RL.mulPlain(ct,wPoly), cz=RL.addConst(cw,20*D), phz=RL.phase(cz).map(v=>Math.round(TFHE.cen(v)/D));
+  const lwe=RL.extract(cz), lweM=T.decrypt(lwe), r=T.bootstrap(lwe,RELU), out=T.decrypt(r.out);
+  R={x,q,m,inRange,nn,ct,ph0,cw,cz,phz,lwe,lweM,r,out,y:out/40,eIn:T.err(T.phase(lwe),m),eOut:T.err(T.phase(r.out),RELU(m))};
+  return R;
+}
+const fr=v=>v/Q;
+function bars(x,y,w,h,vals){ const bw=w/vals.length; return vals.map((v,i)=>`<rect class="bar" style="transform-box:fill-box;transform-origin:bottom" x="${P2(x+i*bw+bw*0.15)}" y="${P2(y+h-Math.max(1.5,v*h))}" width="${P2(bw*0.7)}" height="${P2(Math.max(1.5,v*h))}" fill="currentColor" fill-opacity=".6"/>`).join(""); }
+const box=(x,y,w,h,t1,t2,cls,extra="")=>`<g class="${cls} ${extra}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8" fill="currentColor" fill-opacity=".1" stroke="currentColor" stroke-width="2"/><text x="${x+w/2}" y="${y+h/2-3}" text-anchor="middle" font-size="13.5" font-weight="700" fill="currentColor">${t1}</text><text x="${x+w/2}" y="${y+h/2+15}" text-anchor="middle" font-size="11.5" fill="currentColor" class="c-muted">${t2}</text></g>`;
+
+const steps=[
+{ key:"Idea", who:"both", whoT:"the plan", at:0, budget:"0 used", scale:"—", err:()=>0,
+  title:"Use each scheme for what it does best",
+  cap:()=>`CKKS-style ring ciphertexts pack many values and do linear algebra cheaply. TFHE evaluates ReLU exactly. Scheme switching moves the ciphertext from one to the other in the middle of the neuron.`,
+  scene(){ let g="";
+    g+=box(30,70,160,70,"packed RLWE","linear part w·x + b","c-client","st");
+    g+=box(240,70,150,70,"extract","coefficient → LWE","c-server","st");
+    g+=box(440,70,150,70,"TFHE bootstrap","ReLU by table","c-ok","st");
+    g+=box(630,70,140,70,"repack","LWE → RLWE","c-muted","st");
+    [[190,105,234],[390,105,434],[590,105,624]].forEach(([a,y,b])=>{ g+=`<g class="c-muted ar">${LS.arrow(a+2,y,b,y,"ahm","c-muted")}</g>`; });
+    g+=small(700,160,"for the next layer",'text-anchor="middle"');
+    g+=lbl(30,210,"CHIMERA (2018/2020)","class=\"c-server\" font-weight=\"700\"")+small(30,230,"switch between BFV, CKKS and TFHE ciphertexts that share one ring key");
+    g+=lbl(30,262,"PEGASUS (S&P 2021)","class=\"c-server\" font-weight=\"700\"")+small(30,282,"CKKS ↔ FHEW, with lookup tables for ReLU, sigmoid, max; OpenFHE implements a variant");
+    g+=small(440,210,"This page runs the first three boxes for real.")+small(440,226,"The fourth is explained, not run.");
+    return svg(300,g,"Four boxes left to right: packed ring ciphertext for the linear part, extraction to LWE, TFHE bootstrapping for ReLU, and repacking for the next layer."); },
+  play(){ pop(".st",0,260); fade(".ar",400,260); },
+  math:()=>`<p>Same neuron: x × 10 = [${R.q.join(", ")}], w × 4 = [2, −1], b × 40 = 4, offset 16. Expected m = ${R.m} and f(m) = ${RELU(R.m)}, so y = ${f(RELU(R.m)/40)}.</p>`,
+  explain:()=>`<p>Lessons 1 and 6 show two opposite strengths. CKKS packs thousands of numbers into one ciphertext and computes linear algebra on all of them at once, but it can only approximate ReLU. TFHE computes ReLU exactly with a lookup table, but it handles one number per ciphertext.</p>
+  <p><b>Scheme switching</b> combines them. The linear part runs in a ring ciphertext, the result is converted to LWE ciphertexts, ReLU is bootstrapped exactly, and the outputs are packed back for the next linear layer.</p>
+  <p>The conversions are not free. The rest of the lesson shows where each one costs time, and why the trade-off depends on how many non-linear values a model has.</p>`
+},
+{ key:"Keys", who:"client", whoT:"client", at:0.5, budget:"0 used", scale:"one key", err:()=>0,
+  title:"One secret for both worlds",
+  cap:()=>`The ring secret s(X) has 4 coefficients. Read as a vector, it is also the 4-bit LWE secret of Lesson 6, so the extracted ciphertext can go straight into TFHE bootstrapping.`,
+  scene(){ let g=lbl(40,40,"RING SECRET  s(X) = s₀ + s₁X + s₂X² + s₃X³","class=\"c-client\" font-weight=\"700\"");
+    g+=T.K.s.map((b,i)=>tile(40+i*62,58,54,46,b,"c-client","kb")).join("")+["s₀","s₁","s₂","s₃"].map((t,i)=>small(67+i*62,122,t,'text-anchor="middle"')).join("");
+    g+=lbl(40,170,"same numbers as the LWE secret","class=\"c-client\"")+`<g class="c-client">${LS.arrow(160,132,160,152,"ahc","c-client")}</g>`;
+    g+=T.K.s.map((b,i)=>tile(40+i*62,184,54,46,b,"c-client","kb")).join("")+small(40,250,"LWE secret s = (s₀, s₁, s₂, s₃)");
+    g+=`<line x1="345" y1="30" x2="345" y2="270" stroke="currentColor" stroke-dasharray="4 6" opacity=".5"/>`+small(352,266,"network");
+    const key=(y,name,sub)=>`<g class="c-server keyg"><rect x="380" y="${y}" width="390" height="58" rx="8" fill="currentColor" fill-opacity=".08" stroke="currentColor" stroke-width="2"/>${LS.keyIcon(408,y+29)}<text x="452" y="${y+25}" font-size="14" font-weight="700" fill="currentColor">${name}</text><text x="452" y="${y+44}" font-size="12" fill="currentColor" class="c-muted">${sub}</text></g>`;
+    g+=key(50,"bootstrapping key","GGSW(sᵢ) under the 256-bit ring key S")+key(130,"key-switching key","S → s, as in Lesson 6");
+    g+=small(380,220,"Real schemes need extra switching keys when the CKKS ring and")+small(380,236,"the LWE dimension differ (e.g. N = 65,536 vs n ≈ 600).");
+    return svg(280,g,"The four coefficients of the ring secret are reused as the LWE secret; bootstrapping and key-switching keys go to the server."); },
+  play(){ LS.A(".kb",[{opacity:0,transform:"scaleY(0)"},{opacity:1,transform:"scaleY(1)"}],{s:80,d:450}); slide(".keyg",-100,0,700,200); },
+  math:()=>`<div class="formula">s = (${T.K.s.join(", ")})   ring phase: b(X) − a(X)·s(X)   LWE phase: b − ⟨a, s⟩</div>`,
+  explain:()=>`<p>Switching is easiest when both schemes share the same secret. A ring ciphertext's constant coefficient is an LWE ciphertext whose secret is the ring secret's coefficients. Choosing the ring size equal to the LWE dimension, 4 here, makes the two keys literally the same numbers.</p>
+  <p>Real systems use a large CKKS ring (N = 2¹⁶) and a smaller LWE dimension for fast bootstrapping. They add one key-switching step to go from the big key to the small one. The idea is unchanged.</p>`
+},
+{ key:"Encode", who:"client", whoT:"client", at:0.2, budget:"0 used", scale:"coefficients", err:()=>0,
+  title:"Coefficient encoding makes a dot product",
+  cap:()=>`Put x into coefficients: x(X) = ${R.q[0]} + ${R.q[1]}X. Put w in reverse with a sign flip: w(X) = 2 + 1·X³. Then the constant coefficient of x(X)·w(X) is exactly w₁x₁ + w₂x₂.`,
+  scene(){ const xs=[R.q[0],R.q[1]], ws=[[0,2],[3,1]]; let g=lbl(40,40,"x(X)·w(X): every term, and where it lands","font-weight=\"700\"");
+    g+=small(250,72,"× 2  (X⁰)",'text-anchor="middle"')+small(430,72,"× 1·X³",'text-anchor="middle"');
+    xs.forEach((xv,i)=>{ const y=92+i*70; g+=lbl(40,y+28,`${xv}·X${i?"":"⁰"}`,'class="mono c-client"');
+      ws.forEach(([e,wv],j)=>{ const deg=i+e, wrap=deg>=4, land=deg%4, val=(wrap?-1:1)*xv*wv, hit=land===0;
+        g+=`<g class="cell">${tile(170+j*180,y,160,48,`${wrap?"−":""}${xv*wv}·X${LS.sup(land)}`,hit?"c-ok":"c-muted","",14)}</g>`;
+        if(wrap) g+=small(250+j*180,y+64,"X⁴ = −1 flips the sign",'text-anchor="middle"'); }); });
+    g+=lbl(560,110,"coefficient 0:","font-weight=\"700\"")+lbl(560,136,`${R.q[0]}·2 − ${R.q[1]}·1 = ${2*R.q[0]-R.q[1]}`,'class="mono c-ok"');
+    g+=small(560,166,"= w₁x₁ + w₂x₂ with w = (2, −1)")+small(560,184,"other coefficients: junk we ignore");
+    return svg(260,g,"Grid of the four products of x terms and w terms; the two that land in coefficient zero are highlighted and sum to the dot product."); },
+  play(){ pop(".cell",0,180); },
+  math:()=>`<div class="formula">x(X)·w(X) = ${R.q[0]}·2 + ${R.q[1]}·2·X + ${R.q[0]}·X³ + ${R.q[1]}·X⁴  ≡  (${2*R.q[0]} − ${R.q[1]}) + ${2*R.q[1]}X + ${R.q[0]}X³   (mod X⁴ + 1)</div><p>This trick is used by Cheetah, BOLT and Iron for matrix products: it needs no rotations at all, unlike the slot encoding of Lesson 1.</p>`,
+  explain:()=>`<p>CKKS normally puts values in <b>slots</b>, which needs rotations to sum them (Lesson 1, step 5). An alternative is to put values in the <b>coefficients</b> of the polynomial.</p>
+  <p>Multiplying polynomials then computes many products at once. With the weights written in reverse order and the X⁴ = −1 sign flip compensated, the constant coefficient of the product is exactly the dot product. No rotation and no rotation key are needed.</p>
+  <p>The other coefficients hold partial sums we do not need. Extraction in step 4 picks out only coefficient 0.</p>`
+},
+{ key:"Linear", who:"server", whoT:"server", at:1, budget:"0 used", scale:"Δ = 2²⁶", err:()=>R.eIn/D,
+  title:"One ring ciphertext, one multiplication",
+  cap:()=>`The client encrypts x(X) as one ring ciphertext. The server multiplies by w(X) and adds 20·Δ to the constant term. Decrypting all four coefficients would give [${R.phz.map(big).join(", ")}], and only the first one matters.`,
+  scene(){ let g=lbl(40,40,"ENCRYPTED x(X): one ciphertext (a(X), b(X)) holds both inputs","font-weight=\"700\"");
+    g+=`<g class="c-client">${bars(40,52,180,60,R.ct.a.map(fr))}${bars(240,52,180,60,R.ct.b.map(fr))}</g>`+small(130,130,"a(X)",'text-anchor="middle"')+small(330,130,"b(X)",'text-anchor="middle"');
+    g+=`<g class="c-server op">${tile(470,58,130,46,"× w(X)","c-server","",14)}${tile(620,58,150,46,"+ 20·Δ","c-server","",14)}</g>`;
+    g+=lbl(40,186,"what each coefficient now encrypts (in units of Δ)","font-weight=\"700\"");
+    R.phz.forEach((v,i)=>{ g+=`<g class="ph">${tile(40+i*120,200,108,50,big(v),i===0?"c-ok":"c-muted","",16)}</g>`+small(94+i*120,268,"coef "+i,'text-anchor="middle"'); });
+    g+=lbl(540,224,"m = "+R.phz[0],"class=\"mono c-ok\" font-weight=\"700\"")+small(540,244,"= 40·z + 16");
+    return svg(290,g,"One ring ciphertext holds both inputs; after multiplying by w and adding the bias, the constant coefficient encrypts m equals 30."); },
+  play(){ LS.A(".bar",[{transform:"scaleY(.1)"},{transform:"scaleY(1)"}],{s:50,d:600}); pop(".op",600,250); pop(".ph",1200,120); },
+  math:()=>`<div class="formula">b(X) = a(X)·s(X) + Δ·x(X) + e(X)    ⇒   w(X)·ct  then  b₀ += 20·Δ</div><div class="formula">decrypted coefficients: [${R.phz.join(", ")}] · Δ   (noise in coef 0 ≈ 2^${lg(R.eIn)})</div>`,
+  explain:()=>`<p>This is the CKKS-like half. A single ring ciphertext carries both inputs, and one plaintext × ciphertext multiplication computes the weighted sum. With N = 65,536 the same single multiplication could compute a whole matrix-vector product's worth of dot products.</p>
+  <p>The toy uses integer messages scaled by Δ = 2²⁶, the TFHE encoding, so the result can enter TFHE bootstrapping directly. With real CKKS messages there is an extra rescaling step to match the scales.</p>`
+},
+{ key:"Extract", who:"server", whoT:"server", at:1, budget:"0 used", scale:"LWE n = 4", err:()=>R.eIn/D,
+  title:"Extract coefficient 0 as an LWE ciphertext",
+  cap:()=>`Rearranging a(X) gives an LWE vector a′ = (a₀, −a₃, −a₂, −a₁), and b′ = b₀. That pair decrypts under s to m = ${R.lweM}. Extraction is free and adds no noise.`,
+  scene(){ let g=lbl(40,40,"ring ciphertext after the linear part","font-weight=\"700\"");
+    const cell=(x,y,t,cls,w=88)=>`<g class="${cls}"><rect x="${x}" y="${y}" width="${w}" height="40" rx="5" fill="currentColor" fill-opacity=".1" stroke="currentColor" stroke-width="1.5"/><text x="${x+w/2}" y="${y+25}" text-anchor="middle" font-size="12" fill="currentColor" class="mono">${t}</text></g>`;
+    for(let i=0;i<4;i++){ g+=cell(40+i*98,58,"a"+sub(i),"c-server")+cell(470+i*72,58,"b"+sub(i),"c-server",64); }
+    g+=small(40,122,"a(X)")+small(470,122,"b(X)");
+    const src=[0,3,2,1]; for(let k=0;k<4;k++){ const xs=40+src[k]*98+44, xd=40+k*98+44; g+=`<g class="c-ok lk"><path class="ln" pathLength="1" stroke-dasharray="1" d="M${xs},100 C${xs},170 ${xd},160 ${xd},214" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#ahk)"/></g>`; }
+    g+=`<g class="c-ok lk"><path class="ln" pathLength="1" stroke-dasharray="1" d="M502,100 L502,214" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#ahk)"/></g>`;
+    ["a₀","−a₃","−a₂","−a₁"].forEach((t,k)=>{ g+=cell(40+k*98,220,t,"c-client"); }); g+=cell(470,220,"b₀","c-client",64);
+    g+=small(40,282,"LWE ciphertext (a′, b′) under s")+lbl(580,246,"decrypts to "+R.lweM,"class=\"mono c-ok\" font-weight=\"700\"");
+    return svg(300,g,"Arrows map ring coefficients a zero, minus a three, minus a two, minus a one and b zero into a four-entry LWE ciphertext that decrypts to thirty."); },
+  play(){ draw(".ln",0,700); },
+  math:()=>`<div class="formula">b₀ − (a·s)₀ = b₀ − a₀s₀ + a₃s₁ + a₂s₂ + a₁s₃   ⇒   a′ = (a₀, −a₃, −a₂, −a₁)</div><div class="formula">a′ = (${R.lwe.a.join(", ")}),  b′ = ${R.lwe.b}</div>`,
+  explain:()=>`<p>The constant coefficient of b(X) − a(X)·s(X) is an LWE phase. Because X⁴ = −1, the terms a₃s₁, a₂s₂ and a₁s₃ appear with a minus sign, so the LWE vector is a₀ followed by the negated a coefficients in reverse. This is the same sample extraction used inside TFHE bootstrapping (Lesson 6, step 7).</p>
+  <p>Extracting one coefficient costs nothing. To extract many slot values from real CKKS, the server first runs a slots-to-coefficients transform, which is part of what makes switching expensive.</p>`
+},
+{ key:"Bootstrap", who:"server", whoT:"server", at:1, budget:"1 used", scale:"TFHE", err:()=>R.eOut/D,
+  title:"TFHE bootstrap evaluates ReLU",
+  cap:()=>`The extracted LWE ciphertext goes through the Lesson 6 bootstrap: modulus switch, blind rotation over the ReLU table, extraction, key switch. Out comes an encryption of ${R.out}.`,
+  scene(){ const st=[["mod switch","φ̄ = "+R.r.phi2N],["blind rotate",T.n+" CMuxes"],["extract","n = 256"],["key switch","back to n = 4"]];
+    let g=""; st.forEach((s,i)=>{ g+=box(40+i*190,60,160,70,s[0],s[1],"c-server","bs"); if(i<3) g+=`<g class="c-muted ar">${LS.arrow(202+i*190,95,228+i*190,95,"ahm","c-muted")}</g>`; });
+    g+=lbl(40,190,"input m = "+R.lweM+"  →  output f(m) = "+R.out,"class=\"mono c-ok\" font-weight=\"700\"");
+    g+=small(40,212,"noise in ≈ 2^"+lg(R.eIn)+", noise out ≈ 2^"+lg(R.eOut)+", time "+R.r.ms.toFixed(1)+" ms in this browser");
+    g+=small(40,250,"See Lesson 6 for the rotating lookup ring.");
+    return svg(270,g,"Four boxes for the stages of TFHE bootstrapping; input thirty, output fourteen."); },
+  play(){ pop(".bs",0,250); fade(".ar",300,250); },
+  math:()=>`<div class="formula">PBS(a′, b′; f) with f(m) = max(0, m − 16)  ⇒  ${R.out}</div>`,
+  explain:()=>`<p>From here the ciphertext is an ordinary TFHE input. Programmable bootstrapping evaluates ReLU exactly and resets the noise, exactly as in Lesson 6. The packed ring ciphertext could not do this, and TFHE alone could not do the packed linear part cheaply.</p>`
+},
+{ key:"Repack", who:"server", whoT:"server", at:1, budget:"1 used", scale:"LWE → RLWE", err:()=>R.eOut/D, sim:true,
+  title:"Repack for the next layer",
+  cap:()=>`A real layer produces thousands of LWE outputs. To use packed linear algebra again, they must be packed back into one ring ciphertext. That costs key switching, roughly log₂ N rounds with automorphisms.`,
+  scene(){ let g=lbl(40,40,"Many LWE outputs → one ring ciphertext","font-weight=\"700\"");
+    for(let i=0;i<8;i++){ g+=`<g class="c-client lw"><rect x="${40+i*44}" y="70" width="36" height="36" rx="5" fill="currentColor" fill-opacity=".15" stroke="currentColor"/><text x="${58+i*44}" y="93" text-anchor="middle" font-size="11" fill="currentColor" class="mono">y${sub(i)}</text></g>`; }
+    for(let lvl=0;lvl<3;lvl++){ const n=8>>(lvl+1), w=36*(2**(lvl+1))+8*(2**(lvl+1)-1); for(let k=0;k<n;k++){ const x=40+k*44*(2**(lvl+1)), y=130+lvl*50;
+      g+=`<g class="c-server mg"><rect x="${x}" y="${y}" width="${w}" height="30" rx="5" fill="currentColor" fill-opacity=".12" stroke="currentColor"/><text x="${x+w/2}" y="${y+20}" text-anchor="middle" font-size="11" fill="currentColor">merge ${2**(lvl+1)}</text></g>`; } }
+    g+=small(400,150,"each merge: one automorphism + key switch")+small(400,168,"8 values need log₂ 8 = 3 rounds")+small(400,186,"N = 65,536 values need 16 rounds");
+    g+=small(400,230,"Not run on this page: the toy ring has only 4 coefficients.");
+    return svg(290,g,"Eight LWE outputs are merged pairwise in three rounds into one packed ring ciphertext."); },
+  play(){ pop(".lw",0,60); LS.A(".mg",[{opacity:0,transform:"translateY(-10px)"},{opacity:1,transform:"none"}],{t:500,s:200,d:400}); },
+  math:()=>`<p>Ring packing (e.g. the LWE-to-RLWE packing of Chen, Dai, Kim, Song and later works) merges LWE ciphertexts pairwise. Each merge multiplies one by X^k, adds, and applies an automorphism with a key switch, so packing n values needs about log₂ n key-switching rounds plus O(n) cheap additions.</p>`,
+  explain:()=>`<p>After ReLU, each output is a separate LWE ciphertext. The next layer's matrix product wants them packed in one ring ciphertext again. <b>Ring packing</b> does that by merging pairs with automorphisms and key switching, doubling the packed count each round.</p>
+  <p>PEGASUS and OpenFHE's CKKS-to-FHEW switching include these conversions. In practice the conversions, plus one bootstrap per activation, are what make switching expensive for large models.</p>`
+},
+{ key:"Result", who:"client", whoT:"client", at:0, budget:"1 used", scale:"exact", err:()=>R.inRange?0:"out of table",
+  title:"Decrypt and compare",
+  cap:()=>R.inRange?`The client decrypts ${R.out}, so y = <b>${f(R.y)}</b>: exact ReLU, with the linear part done in one packed ciphertext.`:`m = ${R.m} does not fit the table for this input.`,
+  scene(){ let g=`<g class="c-ok big"><text x="40" y="60" font-size="13" fill="currentColor" font-weight="700">SWITCHING GIVES</text><text x="40" y="108" font-size="44" font-family="var(--mono)" fill="currentColor">${f(R.y)}</text></g>
+      <g class="c-ok big"><text x="320" y="60" font-size="13" fill="currentColor" font-weight="700">TRUE ReLU(z)</text><text x="320" y="108" font-size="44" font-family="var(--mono)" fill="currentColor">${f(R.nn.relu)}</text></g>
+      <g class="c-server big"><text x="580" y="60" font-size="13" fill="currentColor" font-weight="700">CKKS ONLY</text><text x="580" y="108" font-size="44" font-family="var(--mono)" fill="currentColor">0.3262</text></g>`;
+    const rows=[["linear part","1 ring ciphertext × 1 plaintext","2 LWE ciphertexts, 2 scalings"],["ReLU","1 bootstrap (exact)","1 bootstrap (exact)"],["conversions","extract (free) + repack (log N)","none"]];
+    g+=small(220,160,"switching (this page)")+small(500,160,"TFHE only (Lesson 6)");
+    rows.forEach((r,i)=>{ const y=184+i*32; g+=small(40,y,r[0])+lbl(220,y,r[1],'class="c-client"')+lbl(500,y,r[2],'class="c-muted"'); });
+    return svg(290,g,"Switching decrypts 0.35 exactly; a small table compares its operations with TFHE alone."); },
+  play(){ pop(".big",0,250); },
+  math:()=>`<div class="formula">y = ${R.out} / 40 = ${f(R.y)}</div>`,
+  explain:()=>`<p>The answer equals TFHE's: exact ReLU of the quantized neuron. The difference is in the linear part. Here both inputs travelled in one ciphertext and one multiplication did the dot product. With large layers, that is the part that dominates, so switching can be much faster than TFHE alone.</p>`
+},
+{ key:"Cost", who:"both", whoT:"trade-off", at:0.5, budget:"—", scale:"estimate", err:()=>0,
+  title:"When does switching pay off?",
+  cap:()=>`Every activation still costs one bootstrap. For BERT-Base that is millions of bootstraps per sequence, which is why the SoK's CKKS frameworks prefer polynomial approximations despite their error.`,
+  scene(){ const layers=12, ffn=3072, tokens=128, pbs=layers*ffn*tokens, ms=13, sec=pbs*ms/1000;
+    let g=lbl(40,40,"Back-of-envelope: GELUs in BERT-Base for one 128-token sequence","font-weight=\"700\"");
+    const items=[["layers",layers],["GELU per token per layer",ffn],["tokens",tokens],["bootstraps",pbs.toLocaleString()]];
+    items.forEach((it,i)=>{ g+=`<g class="it">${tile(40+i*185,62,148,56,it[1],i===3?"c-warn":"c-server","",16)}</g>`+small(114+i*185,138,it[0],'text-anchor="middle"'); if(i<3) g+=`<text x="${206+i*185}" y="98" text-anchor="middle" font-size="20" fill="currentColor">${i<2?"×":"="}</text>`; });
+    g+=lbl(40,190,`× 13 ms per bootstrap (cited TFHE figure, one core) ≈ ${Math.round(sec).toLocaleString()} s ≈ ${(sec/3600).toFixed(1)} hours`,"class=\"mono c-warn\"");
+    g+=small(40,212,"A CKKS framework handles all 128 tokens × 3072 values of a layer in a few packed ciphertexts per bootstrap.");
+    g+=small(40,240,"Switching wins when exactness matters and non-linear values are few (decision trees, argmax, small heads),")+small(40,256,"or when bootstraps run in parallel on many cores or GPUs.");
+    return svg(275,g,"Twelve layers times 3072 GELUs times 128 tokens is about 4.7 million bootstraps, roughly 17 hours at 13 milliseconds each on one core."); },
+  play(){ pop(".it",0,220); },
+  math:()=>`<p>12 × 3072 × 128 = ${(12*3072*128).toLocaleString()} activations. At the cited 13 ms per TFHE bootstrap (CGGI 2016, single core), that is ${Math.round(12*3072*128*13/1000).toLocaleString()} s. This is an estimate from published figures, not a measurement; modern GPU TFHE is far faster per bootstrap.</p>`,
+  explain:()=>`<p>Switching does not remove the cost of non-linear layers. It moves it into exact bootstraps, one per activation. Transformers have millions of activations per sequence, so that cost is large.</p>
+  <p>The SoK's frameworks mostly stay in CKKS for that reason, and accept approximation error. Switching is attractive for the few places where exactness is essential, such as argmax for token sampling, or when hardware can run many bootstraps in parallel.</p>`
+}];
+
+const cfg={ id:"switching", title:"Scheme Switching Step by Step", compute, setup:()=>{ T.keygen(); RL=TFHE.rlwe(T,4); },
+  inputNote:"x is rounded to one decimal. Keep 0 ≤ 20·x₁ − 10·x₂ + 20 ≤ 31.",
+  status:{ budgetLabel:"Bootstraps", scaleLabel:"Domain", errLabel:"Noise / Δ" },
+  footer:'Real toy pipeline: ring N = 4 sharing its secret with LWE n = 4, Q = 2³², Δ = 2²⁶, TFHE bootstrap with N = 256 (Lesson 6 engine). Repacking is explained, not run. Papers: Boura, Gama, Georgieva, Jetchev, <a href="https://eprint.iacr.org/2018/758">CHIMERA</a>; Lu, Huang, Hong, Ma, Qu, <a href="https://eprint.iacr.org/2020/1606">PEGASUS, IEEE S&amp;P 2021</a>.',
+  cardResult:()=>R.inRange?`${f(R.y)} for a true ${f(R.nn.relu)} (exact on the quantized neuron)`:"out of table range",
+  steps };
+steps.push(LS.cardStep(cfg,{name:"Scheme switching",budget:"1 used",scale:"exact",
+  extra:()=>`<div class="next"><div><b>Best of both</b><br>Packed linear algebra plus exact lookup-table ReLU.</div><div><b>The catch</b><br>One bootstrap per activation plus conversion costs.</div><div><b>Next</b><br>CKKS as an exact engine: lookup tables inside CKKS itself.</div></div>`}));
+LS.start(cfg);
+})();
+</script>
+</body>
+</html>

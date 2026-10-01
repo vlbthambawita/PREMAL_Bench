@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Transciphering Step by Step</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lesson.css">
+</head>
+<body>
+<div id="app"></div>
+<script src="lessons.js"></script>
+<script src="cards/transcipher.js"></script>
+<script src="lesson.js"></script>
+<script src="engines/bfv.js"></script>
+<script>
+(function(){
+"use strict";
+const {svg,tile,lock,lbl,small,arrow,pop,fade,draw,slide,blink,growX,f,fe,big}=LS;
+const t=257n, QB=260, E=BFV.make({N:4,t,qBits:QB}), RC=EXACT.reluCoeffs(t);
+let K, nonce, R;
+const cst=v=>E.encode([v,v,v,v]);
+/* toy HE-friendly stream cipher over Z_257 (Pasta-like): 3 affine layers with public nonce-derived constants, cube S-box between them */
+function prng(seed){ let s=seed>>>0; return ()=>{ s=(Math.imul(s,1664525)+1013904223)>>>0; return BigInt(s%257); }; }
+function roundConsts(n){ const r=prng(n*7919+17), out=[]; for(let i=0;i<3;i++){ let A; do{ A=[[r(),r()],[r(),r()]]; }while(LS.mod(A[0][0]*A[1][1]-A[0][1]*A[1][0],t)===0n); out.push({A,c:[r(),r()]}); } return out; }
+function cipher(k,n){ const C=roundConsts(n); let s=k.slice(); const tr=[{lab:"key",v:s.slice()}];
+  for(let r=0;r<3;r++){ const {A,c}=C[r]; s=[LS.cmod(A[0][0]*s[0]+A[0][1]*s[1]+c[0],t),LS.cmod(A[1][0]*s[0]+A[1][1]*s[1]+c[1],t)]; tr.push({lab:"affine "+(r+1),v:s.slice()}); if(r<2){ s=s.map(v=>LS.cmod(v*v*v,t)); tr.push({lab:"cube",v:s.slice()}); } }
+  return {ks:s,tr,C}; }
+function setup(){ E.keygen(); K=[BigInt(LS.randInt(-128,128)),BigInt(LS.randInt(-128,128))]; nonce=LS.randInt(1,9999); }
+function compute(inp){
+  const x=[inp.x1,inp.x2], xi=x.map(v=>BigInt(Math.round(v*10))), nn=LS.neuron(x);
+  const {ks,tr,C}=cipher(K,nonce), masked=xi.map((v,i)=>LS.cmod(v+ks[i],t));
+  const eK=K.map(k=>E.encrypt(cst(k)));
+  let st=eK, mults=0; const htr=[{lab:"key",ct:st,b:E.budget(st[0])}];
+  for(let r=0;r<3;r++){ const {A,c}=C[r];
+    st=[E.addPlain(E.add(E.mulScalar(st[0],A[0][0]),E.mulScalar(st[1],A[0][1])),cst(c[0])),E.addPlain(E.add(E.mulScalar(st[0],A[1][0]),E.mulScalar(st[1],A[1][1])),cst(c[1]))];
+    htr.push({lab:"affine "+(r+1),ct:st,b:E.budget(st[0])});
+    if(r<2){ st=st.map(v=>{ const v2=E.mul(v,v); return E.mul(v2,v); }); mults+=4; htr.push({lab:"cube",ct:st,b:E.budget(st[0])}); } }
+  const hks=st.map(c=>E.decrypt(c)[0]);
+  const ex=masked.map((m,i)=>E.sub(E.trivial(cst(m)),st[i]));
+  const z=E.addPlain(E.add(E.mulScalar(ex[0],BigInt(Math.round(LS.W[0]*4))),E.mulScalar(ex[1],BigInt(Math.round(LS.W[1]*4)))),cst(BigInt(Math.round(LS.B*40))));
+  const t0=Date.now(), rr=EXACT.evalPoly(E,z,RC), ms=Date.now()-t0, yv=E.decrypt(rr.ct)[0];
+  /* sizes in bytes per encrypted value */
+  const toyCt=E.ctBytes(), toyPer=toyCt/4, maskBytes=9/8;
+  const real=[{name:"BFV, N = 2¹⁴, log q = 438",N:16384,lq:438,slots:16384},{name:"CKKS, N = 2¹⁶, log q = 1555",N:65536,lq:1555,slots:32768}].map(r=>Object.assign(r,{bytes:2*r.N*r.lq/8,per:2*r.N*r.lq/8/r.slots}));
+  R={x,xi,nn,ks,tr,C,masked,eK,htr,hks,mults,ex,exd:ex.map(c=>E.decrypt(c)[0]),z,zd:E.decrypt(z)[0],rr,ms,yv,y:Number(yv)/40,by:E.budget(rr.ct),toyCt,toyPer,maskBytes,real};
+  return R;
+}
+const kfmt=v=>big(v);
+const steps=[
+{ key:"The problem", who:"client", whoT:"client", at:0, budget:"—", scale:"bytes per value", err:()=>0,
+  title:"Ciphertexts are huge, uploads are expensive",
+  cap:()=>`One real CKKS ciphertext is ${(R.real[1].bytes/1e6).toFixed(1)} MB, about ${Math.round(R.real[1].per)} bytes per packed value. A 16-bit number is 2 bytes. Transciphering lets the client upload almost plain-sized data.`,
+  scene(){ const rows=[["plain 16-bit value",2],["transciphered value (toy: 9 bits)",R.maskBytes],["toy BFV ciphertext, per slot",R.toyPer],[R.real[0].name+", per slot",R.real[0].per],[R.real[1].name+", per slot",R.real[1].per]];
+    const sc=v=>Math.log10(v/0.5)/Math.log10(2000)*420;
+    return svg(300,`${lbl(40,30,"Upload cost per encrypted number (bytes, log scale)","font-weight=\"700\"")}
+      ${[1,10,100,1000].map(v=>`<line x1="${300+sc(v)}" y1="44" x2="${300+sc(v)}" y2="262" stroke="currentColor" opacity=".12"/>${small(300+sc(v),280,v+" B",'text-anchor="middle"')}`).join("")}
+      ${rows.map((r,i)=>`${lbl(40,72+i*44,r[0])}<g class="${i<2?"c-ok":"c-noise"}"><rect class="eb" x="300" y="${56+i*44}" width="${Math.max(3,sc(r[1]))}" height="24" rx="3" fill="currentColor"/></g>${small(306+Math.max(3,sc(r[1])),73+i*44,r[1]<10?r[1].toFixed(2)+" B":Math.round(r[1])+" B")}`).join("")}`,"Bar chart on a log scale: plain and transciphered values cost about one or two bytes, while homomorphic ciphertexts cost tens to hundreds of bytes per value."); },
+  play(){ growX(".eb",0,150); },
+  math:()=>`<table class="nums"><thead><tr><th>ciphertext</th><th>size</th><th>slots</th><th>bytes per value</th></tr></thead><tbody><tr><td>toy BFV (N = 4, q = 2²⁶⁰)</td><td class="v">${R.toyCt} B</td><td class="v">4</td><td class="v">${R.toyPer}</td></tr>${R.real.map(r=>`<tr><td>${r.name}</td><td class="v">${(r.bytes/1e6).toFixed(2)} MB</td><td class="v">${r.slots}</td><td class="v">${r.per.toFixed(0)}</td></tr>`).join("")}</tbody></table><p>Real sizes are computed as 2·N·log₂q bits for illustrative parameter sets (128-bit security for BFV at N = 2¹⁴, a typical bootstrappable CKKS set at N = 2¹⁶).</p>`,
+  explain:()=>`<p>Homomorphic ciphertexts are much bigger than the data inside them. A fresh CKKS ciphertext at a typical LLM parameter set takes ${(R.real[1].bytes/1e6).toFixed(1)} MB and carries 32,768 numbers, about ${Math.round(R.real[1].per)} bytes per number. A long prompt therefore costs the client a lot of upload bandwidth and encryption time.</p><p><b>Transciphering</b>, also called hybrid homomorphic encryption, removes this cost. The client encrypts with a fast symmetric cipher, whose ciphertext is as small as the data. The server then converts it into a homomorphic ciphertext by running the cipher's decryption homomorphically.</p><p>The trick needs a symmetric cipher that is cheap to evaluate under FHE: few multiplications and low depth. AES is a poor fit, so a family of HE-friendly ciphers was designed for this.</p>`},
+{ key:"Setup", who:"client", whoT:"client, once", at:0.5, budget:()=>`${R.htr[0].b} bits`, scale:"t = 257", err:()=>0,
+  title:"Once: send the cipher key, encrypted under BFV",
+  cap:()=>`The client picks a symmetric key K = (${R.tr[0].v.map(kfmt).join(", ")}) and uploads Enc(K) one time. Every later query reuses it.`,
+  scene(){ return svg(260,`<g class="c-client"><rect x="40" y="40" width="220" height="170" rx="10" fill="currentColor" fill-opacity=".06" stroke="currentColor" stroke-dasharray="5 5"/>${lbl(60,66,"CLIENT","font-weight=\"700\"")}</g>
+      ${lbl(60,100,"symmetric key K")}${R.tr[0].v.map((v,i)=>`<g class="kk">${tile(60+i*90,112,80,44,kfmt(v),"c-client")}</g>`).join("")}${lock(226,172)}
+      <g class="c-server"><rect x="540" y="40" width="220" height="170" rx="10" fill="currentColor" fill-opacity=".06" stroke="currentColor" stroke-dasharray="5 5"/>${lbl(560,66,"SERVER","font-weight=\"700\"")}</g>
+      ${lbl(560,100,"Enc(K₁), Enc(K₂) under BFV")}${[0,1].map(i=>`<g class="ek">${tile(560+i*90,112,80,44,"Enc","c-client")}</g>`).join("")}
+      <g class="c-client fl"><line x1="268" y1="134" x2="532" y2="134" stroke="currentColor" stroke-width="2" marker-end="url(#ahc)"/></g>${small(400,124,"one-time upload: "+2*R.toyCt+" bytes (toy)",'text-anchor="middle"')}
+      ${small(40,240,"The BFV keys (public, relinearization) are sent as in Lesson 3. K never appears in the clear on the server.")}`,"The client sends its symmetric key encrypted under BFV to the server once."); },
+  play(){ pop(".kk",0,100); draw(".fl line",400,700); pop(".ek",1000,120); },
+  math:()=>`<div class="formula">K = (${R.tr[0].v.map(kfmt).join(", ")}) ∈ Z₂₅₇²,   Enc(Kᵢ) = BFV encryption of Kᵢ in every slot</div>`,
+  explain:()=>`<p>Hybrid encryption starts with a one-time setup. The client chooses a key for a symmetric stream cipher, encrypts that key with the homomorphic scheme, and sends it to the server together with the usual evaluation keys.</p><p>This upload is large, but it happens once. After that, each query costs only symmetric ciphertexts, the size of the data itself. Our toy cipher works over Z₂₅₇, the same plaintext space as BFV in Lesson 3, so its operations map directly onto BFV operations.</p>`},
+{ key:"Keystream", who:"client", whoT:"client", at:0, budget:"—", scale:"Z₂₅₇", err:()=>0,
+  title:"The toy cipher: affine layers and cubes",
+  cap:()=>`For nonce ${nonce}, the cipher mixes K with public matrices and cubes each element twice. The keystream is (${R.ks.map(kfmt).join(", ")}). Its degree is 3 × 3 = 9 in the key.`,
+  scene(){ const tr=R.tr, w=96;
+    return svg(260,`${tr.map((s,i)=>`<g class="st">${small(40+i*125+w/2,40,s.lab,'text-anchor="middle"')}${tile(40+i*125,52,w,40,kfmt(s.v[0]),i===0?"c-client":"c-muted")}${tile(40+i*125,100,w,40,kfmt(s.v[1]),i===0?"c-client":"c-muted")}${i<tr.length-1?`<g class="c-muted"><line x1="${40+i*125+w+4}" y1="96" x2="${40+(i+1)*125-6}" y2="96" stroke="currentColor" stroke-width="2" marker-end="url(#ahm)"/></g>`:""}</g>`).join("")}
+      ${small(40,176,"affine: s ← A·s + c with A, c derived from the public nonce   ·   cube: sᵢ ← sᵢ³ (a bijection on Z₂₅₇)")}
+      <g class="c-ok">${lbl(40,214,"keystream = ("+R.ks.map(kfmt).join(", ")+")",'class="mono"')}</g>
+      ${small(330,214,"total: 3 affine layers, 2 cube layers → 8 multiplications, depth 4")}`,"The key passes through three affine layers and two cube layers to produce the keystream."); },
+  play(){ LS.A(".st",[{opacity:0,transform:"translateX(-10px)"},{opacity:1,transform:"none"}],{s:180,d:400}); },
+  math:()=>`${R.C.map((c,i)=>`<div class="formula">A${LS.sub(i+1)} = [[${c.A[0].map(String).join(", ")}], [${c.A[1].map(String).join(", ")}]],  c${LS.sub(i+1)} = (${c.c.map(String).join(", ")})</div>`).join("")}<p>This is a teaching cipher, not a secure one: two state elements and two rounds. Real HE-friendly ciphers such as Pasta use states of hundreds of elements and carefully analysed round counts.</p>`,
+  explain:()=>`<p>HE-friendly ciphers are built from operations that are cheap under FHE. Linear layers (matrix times state plus a constant) cost no multiplications. The only non-linear part is a low-degree S-box, here x ↦ x³, which is invertible modulo 257 because 3 and 256 share no factor.</p><p>Like Pasta and Rasta, the toy derives the matrices and constants from a public <b>nonce</b>. Every query uses a fresh nonce, so the server can compute those constants itself, but it never learns the key.</p><p>The keystream is a degree-9 function of the key. Evaluating it homomorphically will take 8 ciphertext multiplications at depth 4, far fewer than the hundreds of AND gates per byte that AES would need.</p>`},
+{ key:"Mask", who:"client", whoT:"client", at:0.5, budget:"—", scale:"Z₂₅₇", err:()=>0,
+  title:"Each query: send x + keystream",
+  cap:()=>`The client sends just two numbers, 10·x + keystream mod 257 = (${R.masked.map(kfmt).join(", ")}), plus the nonce. That is ${2*9} bits instead of a ${R.toyCt}-byte ciphertext.`,
+  scene(){ return svg(240,`${lbl(40,40,"10·x")}${R.xi.map((v,i)=>`<g class="a">${tile(170+i*96,22,88,40,big(v),"c-client")}</g>`).join("")}
+      ${lbl(40,96,"+ keystream")}${R.ks.map((v,i)=>`<g class="b">${tile(170+i*96,78,88,40,kfmt(v),"c-muted")}</g>`).join("")}
+      <line x1="170" y1="130" x2="354" y2="130" stroke="currentColor" opacity=".5"/>
+      ${lbl(40,160,"mod 257 =")}${R.masked.map((v,i)=>`<g class="c">${tile(170+i*96,142,88,40,kfmt(v),"c-ok")}</g>`).join("")}
+      <g class="c-ok fl"><line x1="370" y1="162" x2="620" y2="162" stroke="currentColor" stroke-width="2" marker-end="url(#ahk)"/></g>${small(495,152,"upload: 2 × 9 bits + nonce",'text-anchor="middle"')}
+      <g class="c-server">${tile(630,140,130,44,"server","c-server")}</g>
+      ${small(40,220,"Without the keystream the masked values are uniformly random, so they reveal nothing about x.")}`,"The client adds the keystream to its integer inputs modulo 257 and uploads only the two masked numbers."); },
+  play(){ pop(".a",0,90); pop(".b",400,90); pop(".c",900,90); draw(".fl line",1300,600); },
+  math:()=>`<div class="formula">(${R.xi.map(big).join(", ")}) + (${R.ks.map(kfmt).join(", ")}) ≡ (${R.masked.map(kfmt).join(", ")})  (mod 257)</div>`,
+  explain:()=>`<p>This is ordinary stream-cipher encryption, a one-time pad with the keystream. The client's per-query work is a few modular additions, and the upload is as small as the data: two elements of Z₂₅₇.</p><p>For CKKS the data are real numbers, so HERA (ASIACRYPT 2021) adds the keystream modulo a prime p to a scaled real value, and Rubato (EUROCRYPT 2022) adds a small Gaussian noise to the keystream so that fewer rounds are needed. The idea is the same as here.</p>`},
+{ key:"Evaluate cipher", who:"server", whoT:"server", at:1, budget:()=>`${R.htr[R.htr.length-1].b} bits`, scale:"Enc(keystream)", err:()=>0,
+  title:"The server runs the cipher on Enc(K)",
+  cap:()=>`Applying the same affine layers and cubes to Enc(K) gives Enc(keystream). Decrypting it (for checking) gives (${R.hks.map(kfmt).join(", ")}), the same as the client's keystream. Cost: ${R.mults} multiplications.`,
+  scene(){ const h=R.htr, w=96;
+    return svg(270,`${h.map((s,i)=>`<g class="st">${small(40+i*125+w/2,40,s.lab,'text-anchor="middle"')}${tile(40+i*125,52,w,40,kfmt(E.decrypt(s.ct[0])[0]),"c-client")}${lock(40+i*125+w-20,58)}${tile(40+i*125,100,w,40,kfmt(E.decrypt(s.ct[1])[0]),"c-client")}${lock(40+i*125+w-20,106)}${small(40+i*125+w/2,162,s.b+" bits",'text-anchor="middle"')}${i<h.length-1?`<g class="c-server"><line x1="${40+i*125+w+4}" y1="96" x2="${40+(i+1)*125-6}" y2="96" stroke="currentColor" stroke-width="2" marker-end="url(#ahs)"/></g>`:""}</g>`).join("")}
+      ${small(40,190,"tiles show what each encrypted state decrypts to; the numbers under them are the BFV noise budget")}
+      <g class="c-ok">${lbl(40,230,"Enc(keystream) decrypts to ("+R.hks.map(kfmt).join(", ")+"), equal to the client's keystream",'class="mono"')}</g>`,"The server applies the cipher's affine and cube layers to the encrypted key; each encrypted state decrypts to the same value as the client's plaintext computation."); },
+  play(){ LS.A(".st",[{opacity:0,transform:"translateX(-10px)"},{opacity:1,transform:"none"}],{s:180,d:400}); },
+  math:()=>`<table class="nums"><thead><tr><th>layer</th><th>decrypts to</th><th>noise budget</th></tr></thead><tbody>${R.htr.map(s=>`<tr><td>${s.lab}</td><td class="v">(${s.ct.map(c=>kfmt(E.decrypt(c)[0])).join(", ")})</td><td class="v">${s.b} bits</td></tr>`).join("")}</tbody></table>`,
+  explain:()=>`<p>The server knows the nonce, so it knows every matrix and constant. Affine layers become plaintext-scalar multiplications and additions on the encrypted key, which cost almost no noise budget. Each cube is two ciphertext multiplications, x·x then x²·x, with relinearization.</p><p>After the last layer the server holds Enc(keystream) without ever having seen the key or the keystream. The budget dropped from ${R.htr[0].b} to ${R.htr[R.htr.length-1].b} bits, about what a depth-4 circuit costs.</p><p>This conversion is the server's extra work per query. Cipher designs compete on making it small: Pasta minimizes the multiplicative depth for BFV/BGV, Elisabeth is designed for TFHE's lookup tables, and Rubato for CKKS.</p>`},
+{ key:"Unmask + neuron", who:"server", whoT:"server", at:1, budget:()=>`${R.by} bits`, scale:"Enc(x)", err:()=>0,
+  title:"Unmask under encryption, then run the neuron",
+  cap:()=>`Enc(x) = (x + ks) − Enc(ks) decrypts to (${R.exd.map(big).join(", ")}). From here the neuron runs exactly as in Lesson 3: 40·z = ${big(R.zd)}, then the exact ReLU polynomial.`,
+  scene(){ return svg(260,`${lbl(40,40,"masked (public)")}${R.masked.map((v,i)=>tile(220+i*96,22,88,40,kfmt(v),"c-ok")).join("")}
+      ${lbl(40,96,"− Enc(keystream)")}${R.hks.map((v,i)=>`${tile(220+i*96,78,88,40,"Enc","c-client")}${lock(220+i*96+68,84)}`).join("")}
+      <line x1="220" y1="130" x2="404" y2="130" stroke="currentColor" opacity=".5"/>
+      ${lbl(40,160,"= Enc(10·x)")}${R.exd.map((v,i)=>`<g class="u">${tile(220+i*96,142,88,40,big(v),"c-client")}${lock(220+i*96+68,148)}</g>`).join("")}
+      <g class="c-server fl"><line x1="420" y1="162" x2="520" y2="162" stroke="currentColor" stroke-width="2" marker-end="url(#ahs)"/></g>
+      <g class="c-server nr">${tile(530,140,230,44,"Lesson 3 neuron + ReLU","c-server","",13)}</g>
+      ${small(40,220,"the subtraction uses a trivial (noise-free) encryption of the public masked value")}`,"The masked public values minus the encrypted keystream give encryptions of the inputs, which feed the BFV neuron and ReLU."); },
+  play(){ pop(".u",0,100); draw(".fl line",500,500); pop(".nr",900,0); },
+  math:()=>`<div class="formula">Enc(10·xᵢ) = Δ·(xᵢ + ksᵢ) − Enc(ksᵢ)  →  (${R.exd.map(big).join(", ")})</div><div class="formula">40·z = ${big(R.zd)}, ReLU by the degree-256 polynomial: ${R.rr.mults} multiplications, ${R.ms} ms</div>`,
+  explain:()=>`<p>Subtracting the encrypted keystream from the public masked value removes the mask inside the encryption. The server now holds an ordinary BFV encryption of 10·x, exactly what the client would have uploaded in Lesson 3, at a fraction of the bandwidth.</p><p>The rest is unchanged: plaintext weights, additions, and the exact ReLU polynomial. Transciphering does not make the server's main computation cheaper. It only replaces the expensive client upload by extra server work.</p>`},
+{ key:"Decrypt", who:"client", whoT:"client", at:0, budget:()=>`${R.by} bits`, scale:"÷ 40", err:()=>0,
+  title:"Decrypt: the same exact answer",
+  cap:()=>`The client decrypts ${big(R.yv)}, so y = ${big(R.yv)}/40 = <b>${f(R.y)}</b>, exactly ReLU(z). The upload per query was 18 bits instead of ${R.toyCt} bytes.`,
+  scene(){ return svg(220,`<g class="c-client big"><text x="40" y="58" font-size="13" fill="currentColor" font-weight="700">CLIENT DECRYPTS</text><text x="40" y="104" font-size="40" font-family="var(--mono)" fill="currentColor">${big(R.yv)} ÷ 40 = ${f(R.y)}</text></g>
+      <g class="c-ok big"><text x="560" y="58" font-size="13" fill="currentColor" font-weight="700">TRUE ReLU(z)</text><text x="560" y="104" font-size="40" font-family="var(--mono)" fill="currentColor">${f(R.nn.relu)}</text></g>
+      ${small(40,150,"server work per query: "+R.mults+" multiplications for the cipher + "+R.rr.mults+" for ReLU")}
+      ${small(40,172,"client work per query: two additions mod 257 and one decryption")}`,"The decrypted value divided by 40 equals the true ReLU."); },
+  play(){ pop(".big",0,250); },
+  math:()=>`<div class="formula">y = ${big(R.yv)}/40 = ${f(R.y,6)}</div>`,
+  explain:()=>`<p>The answer is identical to Lesson 3: transciphering changes how the input reaches the server, not what the server computes. The client's per-query cost dropped to a few additions, which matters for phones and long prompts.</p><p>The answer still comes back as a full homomorphic ciphertext. Some protocols also compress the result, but download is usually smaller than upload for LLM inference with short outputs.</p>`},
+{ key:"Real ciphers", who:"both", whoT:"literature", at:0, budget:"—", scale:"—", err:()=>0,
+  title:"HE-friendly ciphers in the literature",
+  cap:()=>`Our toy is a two-element Pasta-like cipher. Real designs differ by the target scheme: binary for TFHE, Z_p for BFV/BGV, and noisy or real-valued for CKKS.`,
+  html:true,
+  scene(){ const rows=[["Kreyvium","FSE 2016","bits","FHE (any, boolean)","Trivium variant with 128-bit IV; low AND depth","https://eprint.iacr.org/2015/113"],["Rasta","CRYPTO 2018","bits","FHE / MPC","few ANDs per bit, random affine layers from the nonce","https://eprint.iacr.org/2018/181"],["Pasta","TCHES 2021","Z_p","BFV / BGV","affine layers + cube S-boxes; our toy follows its structure","https://eprint.iacr.org/2021/731"],["HERA","ASIACRYPT 2021","Z_p","CKKS (RtF framework)","real-to-finite-field transciphering for approximate HE","https://eprint.iacr.org/2020/1335"],["Rubato","EUROCRYPT 2022","Z_p + noise","CKKS","noisy cipher, fewer rounds; later key-recovery attack (ePrint 2023/822)","https://eprint.iacr.org/2022/537"],["Elisabeth","ASIACRYPT 2022","Z₁₆","TFHE","filter permutator with lookup-table S-boxes","https://eprint.iacr.org/2022/180"]];
+    return `<div style="overflow-x:auto;padding:4px 20px"><table class="nums"><thead><tr><th>cipher</th><th>venue</th><th>field</th><th>target</th><th>idea</th></tr></thead><tbody>${rows.map(r=>`<tr class="rw"><td><a href="${r[5]}">${r[0]}</a></td><td>${r[1]}</td><td class="v">${r[2]}</td><td>${r[3]}</td><td style="white-space:normal;min-width:260px">${r[4]}</td></tr>`).join("")}</tbody></table></div>`; },
+  play(){ LS.A(".rw",[{opacity:0},{opacity:1}],{s:90,d:400}); },
+  math:()=>`<p>Survey: “The HHE Land: Exploring the Landscape of Hybrid Homomorphic Encryption” (<a href="https://eprint.iacr.org/2025/071">ePrint 2025/071</a>).</p>`,
+  explain:()=>`<p>The design target decides the cipher. TFHE evaluates boolean or small-integer lookups cheaply, so Kreyvium and Elisabeth work on bits or 4-bit values. BFV and BGV favour large prime fields with low multiplicative depth, which is Pasta's niche. CKKS needs real numbers, so HERA maps reals into a finite field and back, and Rubato adds noise to keep rounds low.</p><p>Security is the delicate part. These ciphers are young, and several have seen cryptanalysis. Rubato had a key-recovery attack (ePrint 2023/822), and fault and side-channel attacks have been shown on Pasta and Elisabeth implementations. Deployments should follow the latest analysis.</p>`}
+];
+const cfg={ id:"transcipher", title:"Transciphering Step by Step", compute, setup,
+  inputNote:"x is rounded to one decimal (×10). New random keys also picks a new cipher key and nonce.",
+  reseedLabel:"New keys and nonce",
+  status:{budgetLabel:"Noise budget", scaleLabel:"Data form", errLabel:"Error so far"},
+  footer:'Real toy hybrid encryption in your browser: a two-element Pasta-like cipher over Z₂₅₇ (affine layers from the nonce, cube S-box), evaluated under toy BFV with N = 4, t = 257, q = 2²⁶⁰. Insecure sizes, real algebra. Papers: Pasta (<a href="https://eprint.iacr.org/2021/731">TCHES 2021</a>), HERA (<a href="https://eprint.iacr.org/2020/1335">ASIACRYPT 2021</a>), Rubato (<a href="https://eprint.iacr.org/2022/537">EUROCRYPT 2022</a>).',
+  cardResult:()=>`${big(R.yv)}/40 = ${f(R.y)}, exact (18-bit upload)`, steps };
+steps.push(LS.cardStep(cfg,{name:"Transciphering",budget:()=>`${R.by} bits`,scale:"—",err:()=>0,
+  extra:()=>`<div class="next"><div><b>Paillier</b><br>A classic scheme with small ciphertexts but additions only.</div><div><b>Threshold FHE</b><br>Split the decryption key between parties.</div></div>`,
+  math:()=>`<p>Toy parameters: cipher state of 2 elements, 2 cube rounds; BFV with N = 4, t = 257, q = 2²⁶⁰.</p>`,
+  explain:()=>`<p>Transciphering is an add-on, not a new homomorphic scheme. It trades a small amount of extra server computation for a large reduction in client upload, and works with whichever scheme the server uses.</p>`}));
+LS.start(cfg);
+})();
+</script>
+</body>
+</html>
