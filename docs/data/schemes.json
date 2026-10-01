@@ -1014,7 +1014,7 @@
   "group": "7. Scheme switching and hybrid (transciphering) HE",
   "name": "Pasta / Rasta / Kreyvium / Elisabeth (HHE ciphers)",
   "year": 2021,
-  "venue": "TCHES 2021 (Pasta); CRYPTO 2018 (Rasta); FSE 2016 (Kreyvium); ASIACRYPT 2022 (Elisabeth)",
+  "venue": "TCHES 2023 (Pasta, ePrint 2021); CRYPTO 2018 (Rasta); FSE 2016 (Kreyvium); ASIACRYPT 2022 (Elisabeth)",
   "authors": "Dobraunig et al.; Canteaut et al.; Cosseron et al.",
   "title": "Pasta: A Case for Hybrid Homomorphic Encryption",
   "paper": "https://eprint.iacr.org/2021/731",

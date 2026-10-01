@@ -1,5 +1,7 @@
 # Visual lesson plan: one neuron, every scheme
 
+**Status (2026-10-01):** all 20 lessons are built and listed in `lessons.js`; every scheme row on the main table links to its lesson. The lesson numbering in `lessons.js` is authoritative; §7 below is the original design order and topics.
+
 This plan turns each scheme on the main table (`docs/data/schemes.json`) into an
 interactive lesson like `docs/learn/ckks.html`. It is written so lessons can be
 built one paper at a time, in a fixed order, with the same structure and the same

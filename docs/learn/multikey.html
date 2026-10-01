@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Multi-key CKKS Step by Step</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lesson.css">
+</head>
+<body>
+<div id="app"></div>
+<script src="lessons.js"></script>
+<script src="cards/multikey.js"></script>
+<script src="lesson.js"></script>
+<script src="engines/ckks.js"></script>
+<script src="engines/ckks-extra.js"></script>
+<script>
+(function(){
+"use strict";
+const {svg,tile,lock,keyIcon,lbl,small,arrow,pop,fade,draw,slide,blink,growX,f,fe,sup,big}=LS;
+const P_=LS.poly, MK=CKKSX.mk;
+const C=CKKS.make({N:4,deltaBits:20,q0Bits:30,levels:3,pBits:100}), q=C.q, D=C.D;
+const W=LS.W, B=LS.B, C0=0.09375, C1=0.5, C2=0.46875;
+let K1,K2;
+function setup(){ K1=C.keygen(); K2=C.keygen(); }
+const encUnder=(K,v)=>{ C.K=K; return C.encrypt(C.encode([v,v])); };
+let R;
+function compute(inp){
+  const x=[inp.x1,inp.x2], n=LS.neuron(x), poly=C0+C1*n.z+C2*n.z*n.z;
+  const X1=MK.fromCt(encUnder(K1,x[0]),1), X2=MK.fromCt(encUnder(K1,x[1]),1);
+  const W1=MK.fromCt(encUnder(K2,W[0]),2), W2=MK.fromCt(encUnder(K2,W[1]),2), Bc=MK.fromCt(encUnder(K2,B),2);
+  const p1=MK.mul(X1,W1,C), p2=MK.mul(X2,W2,C);
+  const dot=MK.rescale(MK.add(p1,p2,C),C);
+  const z=MK.add(dot,MK.down(Bc,C,dot.l),C);
+  const zz=MK.rescale(MK.mul(z,z,C),C), t=MK.rescale(MK.mulPt(zz,C.cst(C2),C),C);
+  const u=MK.down(MK.rescale(MK.mulPt(z,C.cst(C1),C),C),C), y=MK.addPt(MK.add(t,u,C),C.cst(C0),C);
+  const dec=(A,sc=D)=>C.decode(MK.dec(A,C,K1.s,K2.s),sc)[0];
+  // decrypting with only one key: drop the other key's monomials (treat its secret as unknown = 0)
+  const zero=new Array(4).fill(0n);
+  const onlyClient=C.decode(MK.dec(y,C,K1.s,zero))[0], onlyServer=C.decode(MK.dec(y,C,zero,K2.s))[0];
+  R={x,n,poly,X1,W1,p1,z,zz,y,vX1:dec(X1),vW1:dec(W1),vp1:dec(p1,D*D),vz:dec(z),vzz:dec(zz),vy:dec(y),onlyClient,onlyServer,
+     sizes:{fresh:MK.size(X1),prod:MK.size(p1),z:MK.size(z),zz:MK.size(zz),y:MK.size(y)}};
+  return R;
+}
+const box=(x,y,w,h,t,cls,sub)=>`<g class="${cls} bx"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8" fill="currentColor" fill-opacity=".08" stroke="currentColor" stroke-width="2"/><text x="${x+w/2}" y="${y+(sub?h/2-2:h/2+5)}" text-anchor="middle" font-size="13.5" font-weight="700" fill="currentColor">${t}</text>${sub?`<text x="${x+w/2}" y="${y+h/2+15}" text-anchor="middle" font-size="11.5" fill="currentColor" class="c-muted">${sub}</text>`:""}</g>`;
+const mono=k=>{ const [i,j]=k.split(",").map(Number); const t=(i?"s₁"+(i>1?sup(i):""):"")+(j?"s₂"+(j>1?sup(j):""):""); return t||"1"; };
+const clsOf=k=>{ const [i,j]=k.split(",").map(Number); return i&&j?"c-noise":i?"c-client":j?"c-server":"c-muted"; };
+const hx=v=>LS.hex(v,q[3],4);
+const ktile=(x,y,w,h,t,cls,fs=15)=>`<g class="${cls}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="currentColor" fill-opacity=".12" stroke="currentColor" stroke-width="2"/><text x="${x+w/2}" y="${y+h/2+5}" text-anchor="middle" font-size="${fs}" font-weight="700" fill="currentColor">${t}</text></g>`;
+const steps=[
+{ key:"Setting", who:"both", whoT:"the task", at:0.5, budget:4, scale:"—", err:()=>0,
+  title:"Private input and private weights",
+  cap:()=>"Now the server's weights are secret too. The client encrypts x under its own key s₁ and the server encrypts w and b under its own key s₂. There is no shared setup between them.",
+  scene(){ let g=box(30,40,220,90,"Client","c-client","key s₁, encrypts x")+box(550,40,220,90,"Model owner","c-server","key s₂, encrypts w and b");
+    g+=box(290,190,220,80,"Compute server","c-muted","multiplies across keys");
+    g+=arrow(140,132,300,206,"ahc","c-client")+arrow(660,132,500,206,"ahs","c-server");
+    g+=small(212,176,"Enc₁(x₁), Enc₁(x₂)",'text-anchor="middle" stroke="var(--panel)" stroke-width="5" paint-order="stroke"')+small(588,176,"Enc₂(w₁), Enc₂(w₂), Enc₂(b)",'text-anchor="middle" stroke="var(--panel)" stroke-width="5" paint-order="stroke"');
+    g+=`<g class="c-noise kk"><text x="400" y="86" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">two unrelated keys</text><text x="400" y="104" text-anchor="middle" font-size="12" fill="currentColor">no joint key generation</text></g>`;
+    return svg(290,g,"The client and model owner encrypt under their own unrelated keys and send ciphertexts to a compute server."); },
+  play(){ pop(".bx",0,200); fade(".kk",700); },
+  math:()=>`<div class="formula">Enc₁(m): c₀ + c₁·s₁ = Δm + e,    Enc₂(m): c₀ + c₁·s₂ = Δm + e</div>`,
+  explain:()=>`<p>The SoK's threat model keeps model weights in the clear on the server. Some deployments want more: the model owner may not trust the compute provider either, or two organisations may each contribute private data. Then both the input and the weights must be encrypted, and by different owners.</p>
+<p><b>Multi-key FHE</b> lets each party use its own key, generated independently. The server can still combine ciphertexts under different keys. The result can only be decrypted with all the keys involved. Unlike threshold FHE (Lesson 11), no joint key-generation round is needed, and a new party can join at any time.</p>
+<p>This lesson runs the neuron with the client's key s₁ for x and the model owner's key s₂ for w and b, using the toy CKKS engine for both keys.</p>`},
+
+{ key:"Extend", who:"server", whoT:"server", at:1, budget:4, scale:"Δ", err:()=>Math.abs(R.vX1-R.x[0]),
+  title:"Extend ciphertexts to a joint key vector",
+  cap:()=>"A single-key ciphertext (c₀, c₁) is padded with zeros so it lives under the key vector (1, s₁, s₂). The client's ciphertexts fill the s₁ slot, the owner's fill the s₂ slot.",
+  scene(){ const row=(y,label,cells)=>small(30,y+22,label)+cells.map((c,i)=>`<g class="cell">${tile(220+i*130,y,120,36,c[0],c[1],"",12)}</g>`).join("");
+    let g=small(220,30,"KEY VECTOR")+["1","s₁","s₂"].map((k,i)=>`<g class="kv">${tile(220+i*130,40,120,36,k,["c-muted","c-client","c-server"][i],"",14)}</g>`).join("");
+    g+=row(100,"Enc₁(x₁) extended",[[hx(R.X1.c["0,0"][0]),"c-client"],[hx(R.X1.c["1,0"][0]),"c-client"],["0","c-muted"]]);
+    g+=row(150,"Enc₂(w₁) extended",[[hx(R.W1.c["0,0"][0]),"c-server"],["0","c-muted"],[hx(R.W1.c["0,1"][0]),"c-server"]]);
+    g+=small(220,214,"(first coefficient of each polynomial shown)");
+    g+=`<g class="c-ok"><text x="220" y="250" font-size="12.5" fill="currentColor">decrypting with ⟨ct, (1, s₁, s₂)⟩ gives x₁ = ${f(R.vX1,5)} and w₁ = ${f(R.vW1,5)}</text></g>`;
+    return svg(270,g,"Two ciphertexts padded with zeros under the key vector one, s1, s2: the client's uses the s1 position and the owner's uses the s2 position."); },
+  play(){ pop(".kv",0,120); pop(".cell",500,70); },
+  math:()=>`<div class="formula">Enc₁(x₁) = (c₀, c₁)  →  (c₀, c₁, 0)    Enc₂(w₁) = (c₀', c₁')  →  (c₀', 0, c₁')</div><div class="formula">⟨(c₀, c₁, c₂), (1, s₁, s₂)⟩ = c₀ + c₁·s₁ + c₂·s₂</div>`,
+  explain:()=>`<p>Decryption of a CKKS ciphertext is an inner product with (1, s). With two parties, the natural extension is an inner product with (1, s₁, s₂). Padding a single-key ciphertext with a zero in the other party's position changes nothing about what it encrypts.</p>
+<p>Once both ciphertexts live under the same key vector, additions work component by component. Multiplication is where multi-key schemes do their real work, as the next step shows.</p>`},
+
+{ key:"Multiply", who:"server", whoT:"server", at:1, budget:3, scale:"Δ", err:()=>Math.abs(R.vz-R.n.z),
+  title:"Multiplying across keys creates s₁·s₂ terms",
+  cap:()=>`x₁·w₁ multiplies a ciphertext under s₁ with one under s₂. The product has ${R.sizes.prod} components, for the key terms 1, s₁, s₂ and s₁s₂. Summing both products and adding b gives z = ${f(R.vz,5)}.`,
+  scene(){ let g=small(40,30,"PRODUCT x₁·w₁: ONE COMPONENT PER KEY TERM");
+    Object.keys(R.p1.c).forEach((k,i)=>{ g+=`<g class="cp">${ktile(40+i*150,42,140,40,mono(k),clsOf(k))}</g>`+small(110+i*150,100,hx(R.p1.c[k][0]),'text-anchor="middle" class="mono c-muted"'); });
+    g+=lbl(40,150,"decrypt = c₀₀ + c₁₀·s₁ + c₀₁·s₂ + c₁₁·s₁s₂","class=\"mono\"");
+    g+=small(40,186,"x₁·w₁ = "+f(R.vp1,5)+"   (exact "+f(R.n.prod[0],5)+")");
+    g+=arrow(400,200,400,226,"ahs","c-server")+small(410,218,"+ x₂·w₂, rescale, + Enc₂(b)");
+    g+=`<g class="zz">${tile(280,230,240,46,"z = "+f(R.vz,6),"c-ok","",15)}</g>`+small(530,258,`still ${R.sizes.z} components`);
+    return svg(290,g,"The cross-key product has four components for the key terms one, s1, s2 and s1 times s2; summing and adding the bias gives z."); },
+  play(){ pop(".cp",0,150); pop(".zz",900); },
+  math:()=>`<div class="formula">(a₀ + a₁s₁)(b₀ + b₁s₂) = a₀b₀ + a₁b₀·s₁ + a₀b₁·s₂ + a₁b₁·s₁s₂</div><table class="nums"><tbody><tr><td>x₁·w₁</td><td class="v">${f(R.vp1,7)}</td></tr><tr><td>z</td><td class="v">${f(R.vz,7)} (exact ${f(R.n.z,7)})</td></tr></tbody></table>`,
+  explain:()=>`<p>Multiplying two ciphertexts multiplies their decryption formulas. Because the formulas use different secrets, the product contains a cross term with s₁·s₂, which neither party can compute alone. In this toy the server simply keeps one component per key term.</p>
+<p>Real multi-key CKKS (Chen, Dai, Kim, Song, CCS 2019) adds a <b>multi-key relinearization</b>: each party publishes an evaluation key, and the server uses them to fold every s₁s₂ term back into the s₁ and s₂ components. The ciphertext then stays at k + 1 components for k parties, and each party can decrypt its own part.</p>`},
+
+{ key:"ReLU", who:"server", whoT:"server", at:1, budget:1, scale:"Δ", err:()=>Math.abs(R.vy-R.poly),
+  title:"Squaring makes the ciphertext grow",
+  cap:()=>`Evaluating p(z) needs z², and z² has ${R.sizes.zz} components, one for every s₁ⁱ·s₂ʲ with i, j ≤ 2. Without relinearization the size keeps growing with every multiplication.`,
+  scene(){ let g=small(40,30,"COMPONENTS OF z² (rows: power of s₁, columns: power of s₂)");
+    for(let i=0;i<=2;i++) for(let j=0;j<=2;j++){ const k=i+","+j, on=!!R.zz.c[k]; g+=`<g class="gc">${ktile(110+j*130,48+i*60,120,48,mono(k),on?clsOf(k):"c-muted")}</g>`; }
+    ["s₂⁰","s₂¹","s₂²"].forEach((t,j)=>{ g+=small(170+j*130,236,t,'text-anchor="middle"'); }); ["s₁⁰","s₁¹","s₁²"].forEach((t,i)=>{ g+=small(90,78+i*60,t,'text-anchor="end"'); });
+    const bars=[["fresh",R.sizes.fresh],["after x·w",R.sizes.prod],["after z²",R.sizes.zz]];
+    g+=small(540,48,"COMPONENTS (this toy)");
+    bars.forEach((b,i)=>{ g+=small(540,82+i*48,b[0])+`<g class="c-noise"><rect class="eb" x="620" y="${66+i*48}" width="${b[1]*16}" height="24" rx="3" fill="currentColor" fill-opacity=".7"/><text x="${628+b[1]*16}" y="${83+i*48}" font-size="13" font-weight="700" fill="currentColor">${b[1]}</text></g>`; });
+    g+=`<g class="c-ok"><text x="540" y="222" font-size="12" fill="currentColor">with MK relinearization: 3 at every step</text></g>`;
+    return svg(250,g,"A three by three grid of key monomials filled by z squared, and bars showing the ciphertext growing from 2 to 4 to 9 components."); },
+  play(){ pop(".gc",0,60); growX(".eb",700,250); },
+  math:()=>`<table class="nums"><thead><tr><th>after</th><th>components</th><th>value</th></tr></thead><tbody><tr><td>z</td><td class="v">${R.sizes.z}</td><td class="v">${f(R.vz,6)}</td></tr><tr><td>z² (rescaled)</td><td class="v">${R.sizes.zz}</td><td class="v">${f(R.vzz,6)}</td></tr><tr><td>p(z) = 0.09375 + 0.5z + 0.46875z²</td><td class="v">${R.sizes.y}</td><td class="v">${f(R.vy,6)}</td></tr></tbody></table>`,
+  explain:()=>`<p>The ReLU polynomial is the same as in Lesson 1, and the levels used are the same. What changes is the ciphertext shape. Squaring a 4-component ciphertext gives 9 components, because every key term meets every other.</p>
+<p>The growth is the reason multi-key schemes need relinearization. CDKS19 brings every product back to k + 1 components, so a two-party ciphertext always has three polynomials. Its cost grows with the number of parties, and that cost is the price of not having a joint key.</p>`},
+
+{ key:"Decrypt", who:"both", whoT:"both parties", at:0, budget:1, scale:"Δ", err:()=>Math.abs(R.vy-R.poly),
+  title:"Only both keys together decrypt",
+  cap:()=>`With both keys, the 9 components decrypt to y = ${f(R.vy,5)}. Leaving out either key gives ${f(R.onlyClient,0)} or ${f(R.onlyServer,0)}, which is meaningless.`,
+  scene(){ const bars=[["client key only",R.onlyClient,"c-client"],["owner key only",R.onlyServer,"c-server"],["both keys",R.vy,"c-ok"]];
+    const mx=Math.max(...bars.map(b=>Math.abs(b[1])),1), X0=400, half=330;
+    let g=`<line x1="${X0}" y1="30" x2="${X0}" y2="226" stroke="currentColor" opacity=".35"/>`+small(X0,242,"0",'text-anchor="middle"');
+    bars.forEach((b,i)=>{ const y=50+i*64, w=Math.max(3,Math.abs(b[1])/mx*half), x=b[1]<0?X0-w:X0;
+      g+=small(30,y-6,b[0])+`<g class="${b[2]}"><rect class="eb" x="${x}" y="${y}" width="${w}" height="30" rx="3" fill="currentColor" fill-opacity=".7"/><text x="${b[1]<0?X0+10:x+w+8}" y="${y+20}" font-size="13" font-weight="700" fill="currentColor">${b[1]<0?"−":""}${Math.abs(b[1])<10?f(Math.abs(b[1]),4):Math.round(Math.abs(b[1])).toLocaleString("en-US")}</text></g>`; });
+    g+=small(400,270,"decoded slot 1, same scale for all three bars",'text-anchor="middle"');
+    return svg(284,g,"Bars of the decoded value with one key only, which are large and random, and with both keys, which is the correct small y."); },
+  play(){ fade(".eb",0,300); },
+  math:()=>`<div class="formula">y = decode( Σ c_ij · s₁ⁱ · s₂ʲ ),  9 terms</div><table class="nums"><tbody><tr><td>both keys</td><td class="v">${f(R.vy,8)}</td></tr><tr><td>p(z) in the clear</td><td class="v">${f(R.poly,8)}</td></tr></tbody></table>
+    <p>Toy shortcut: without relinearization, the terms with s₁·s₂ need both secrets at once, so this demo evaluates the decryption formula with both keys. A real scheme relinearizes first; then each party publishes cᵢ·sᵢ plus flooding noise, exactly like the threshold lesson.</p>`,
+  explain:()=>`<p>Decryption of a multi-key ciphertext needs every key that contributed. In a real deployment it is a short protocol: after relinearization the ciphertext is (c₀, c₁, c₂), the client publishes c₁·s₁ + flood and the owner publishes c₂·s₂ + flood, and the receiver adds them to c₀.</p>
+<p>The bars show why one key is not enough. The missing key's terms are large random-looking polynomials, so the partial result decodes to noise. The result itself matches the single-key CKKS answer of Lesson 1, because the computation and the polynomial are the same.</p>`},
+
+{ key:"Scaling", who:"both", whoT:"research", at:0.5, budget:1, scale:"—", err:()=>"—",
+  title:"The cost of more parties, and multi-key TFHE",
+  cap:()=>"With relinearization a k-party CKKS ciphertext has k + 1 components, so every operation costs about k times more. Multi-key TFHE has the same shape: one LWE part per party.",
+  scene(){ const ks=[1,2,3,4,6,8]; const X0=110,X1=430,Y0=230,Y1=40, mx=9;
+    const sx=k=>X0+(k-1)/7*(X1-X0), sy=v=>Y0-v/mx*(Y0-Y1);
+    let g=`<line x1="${X0}" y1="${Y0}" x2="${X1}" y2="${Y0}" stroke="currentColor" opacity=".4"/><line x1="${X0}" y1="${Y1}" x2="${X0}" y2="${Y0}" stroke="currentColor" opacity=".4"/>`;
+    ks.forEach(k=>{ g+=small(sx(k),Y0+16,String(k),'text-anchor="middle"'); }); [0,3,6,9].forEach(v=>{ g+=small(X0-8,sy(v)+4,String(v),'text-anchor="end"'); });
+    g+=small((X0+X1)/2,Y0+34,"number of parties k",'text-anchor="middle"')+small(X0,Y1-10,"polynomials per ciphertext (after relinearization)");
+    g+=`<g class="c-noise"><path class="cv" pathLength="1" stroke-dasharray="1" d="${ks.map((k,i)=>(i?"L":"M")+sx(k)+","+sy(k+1)).join("")}" fill="none" stroke="currentColor" stroke-width="3"/>${ks.map(k=>`<circle cx="${sx(k)}" cy="${sy(k+1)}" r="4" fill="currentColor"/>`).join("")}</g>`;
+    g+=`<g class="c-muted"><line x1="470" y1="30" x2="470" y2="270" stroke="currentColor" opacity=".3"/></g>`;
+    g+=lbl(490,50,"Multi-key TFHE","font-weight=\"700\"")+small(490,68,"Chen, Chillotti, Song, ASIACRYPT 2019 (cited)");
+    g+=`<g class="ct">`+[["ciphertext","k LWE masks + one body"],["bootstrapping","each party's bootstrapping key,"],["","cost grows with k"],["follow-ups","linear-complexity MK-TFHE (2023/065),"],["","FINALLY on NTRU (2024/1505)"],["no setup","plain-model MK-FHE (CRYPTO 2026)"]].map((r,i)=>`<text x="490" y="${102+i*28}" font-size="12.5" font-weight="700" fill="currentColor">${r[0]}</text><text x="590" y="${102+i*28}" font-size="12" fill="currentColor" class="c-muted">${r[1]}</text>`).join("")+`</g>`;
+    return svg(280,g,"A line chart of ciphertext size growing as k plus one with the number of parties, next to notes on multi-key TFHE."); },
+  play(){ draw(".cv",0,900); fade(".ct",500); },
+  math:()=>`<p>The chart plots k + 1, the size of a relinearized multi-key CKKS ciphertext (Chen, Dai, Kim, Song, CCS 2019). The multi-key TFHE facts are cited from the papers on the schemes table.</p>`,
+  explain:()=>`<p>A multi-key ciphertext carries one component per party. Additions and plaintext products cost k + 1 times a single-key one, and multi-key relinearization costs more, roughly quadratic in k in CDKS19. That is fine for a client and a model owner, and expensive for dozens of parties.</p>
+<p><b>Multi-key TFHE</b> (Chen, Chillotti, Song, ASIACRYPT 2019) does the same for gate bootstrapping. A ciphertext has a mask for every party and is bootstrapped with every party's key. Later work reduces the growth to linear in k (ePrint 2023/065), moves to NTRU (FINALLY, CIC 2024), and in 2026 removes the need for any common setup at all.</p>
+<p>For private LLM inference, multi-key CKKS is the natural way to keep weights secret from the server as well as inputs, at the cost of ciphertext-ciphertext products in every linear layer, which are slower and noisier than the plaintext weights of the SoK's frameworks.</p>`}
+];
+const cfg={ id:"multikey", title:"Multi-key CKKS Step by Step", compute, setup,
+  inputNote:"Change x to recompute. New keys draws fresh independent keys for both parties.",
+  status:{budgetLabel:"Levels left", budgetCells:4, scaleLabel:"Scale"},
+  footer:'Real toy multi-key CKKS: N = 4, Δ = 2²⁰, q = 2⁹⁰, two independent keys. Ciphertexts are kept as one component per key monomial s₁ⁱs₂ʲ; the demo decrypts with both keys instead of running multi-key relinearization. Papers: <a href="https://eprint.iacr.org/2019/524">CDKS19</a>, <a href="https://eprint.iacr.org/2019/116">multi-key TFHE</a>, <a href="https://eprint.iacr.org/2013/094">LTV</a>.',
+  cardResult:()=>`${f(R.vy,4)} for a true ${f(R.n.relu,4)}, weights encrypted too`,
+  steps };
+steps.push(LS.cardStep(cfg,{name:"Multi-key CKKS",budget:1,err:()=>Math.abs(R.vy-R.n.relu)}));
+LS.start(cfg);
+})();
+</script>
+</body>
+</html>

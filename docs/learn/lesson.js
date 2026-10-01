@@ -140,7 +140,7 @@ LS.start = function(cfg){
   function go(i, keepPlay){
     cur = Math.max(0, Math.min(steps.length-1, i)); const s = steps[cur];
     if(!keepPlay) stop();
-    $("st-title").innerHTML = val(s.title) + (s.sim ? '<span class="badge-sim" title="This step shows the arithmetic in the clear">plaintext simulation</span>' : "");
+    $("st-title").innerHTML = val(s.title) + (s.sim ? `<span class="badge-sim" title="This step is not run under encryption">${typeof s.sim === "string" ? s.sim : "plaintext simulation"}</span>` : "");
     const w = $("st-who"); w.className = "who "+s.who; w.textContent = s.whoT;
     $("scene").innerHTML = s.scene(); $("st-cap").innerHTML = s.cap(); $("mathbody").innerHTML = s.math ? s.math() : ""; $("explainbody").innerHTML = s.explain ? s.explain() : "";
     [...chips.children].forEach((c,j) => { c.setAttribute("aria-current", j===cur ? "step" : "false"); c.classList.toggle("done", j < cur); });
