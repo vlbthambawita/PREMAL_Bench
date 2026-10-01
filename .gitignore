@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local paper archive (PDFs of the SoK and its references) - not tracked
+papers/
