@@ -1,6 +1,6 @@
 (window.LESSON_CARDS=window.LESSON_CARDS||{})["fhe-history"]={
  slot:"An integer mod t (DGHV, LWE, NTRU); CRT slots from Smart–Vercauteren",
- values:"1 per ciphertext (DGHV, BV11); N/... slots once packing is used",
+ values:"1 per ciphertext (DGHV, BV11); up to N slots mod t with Smart–Vercauteren packing",
  ops:"Add and multiply, until the noise runs out",
  linear:"Integer or polynomial arithmetic on ciphertexts: exact, small noise growth",
  relu:"Not attempted: needs deep circuits and bootstrapping",

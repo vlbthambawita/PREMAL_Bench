@@ -48,11 +48,10 @@ const steps=[
   title:"Thirty years to full homomorphism",
   cap:()=>`Rivest, Adleman and Dertouzos asked for "privacy homomorphisms" in 1978. The answer came in 2009, and the schemes in this lesson turned it into the ones used today.`,
   scene(){ const ev=[[1978,"privacy homomorphisms asked for",0],[2009,"Gentry: first FHE + bootstrapping",1],[2010,"DGHV: FHE over the integers",1],[2010,"Smart–Vercauteren: SIMD slots",1],[2011,"BV11: FHE from standard LWE",1],[2012,"LTV: NTRU multi-key FHE",1],[2012,"BGV, BFV (lessons 3–4)",0],[2013,"YASHE · GSW",1],[2016,"TFHE (lesson 6)",0],[2017,"CKKS (lesson 1)",0],[2025,"CCA-secure FHE from LWE",1]];
-    const x=y=>60+(y-1975)*13.2; let g=`<line x1="50" y1="150" x2="760" y2="150" stroke="currentColor" stroke-width="2" opacity=".4"/>`;
-    [1980,1990,2000,2010,2020].forEach(y=>{ g+=`<line x1="${x(y)}" y1="144" x2="${x(y)}" y2="156" stroke="currentColor" opacity=".4"/>`+small(x(y),174,String(y),'text-anchor="middle"'); });
-    ev.forEach(([y,t2,me],i)=>{ const up=i%2===0, yy=up?130-((i/2)%3)*30:170+(((i-1)/2)%3)*30+26; const cls=me?"c-client":"c-muted";
-      g+=`<g class="tev ${cls}"><line x1="${x(y)}" y1="150" x2="${x(y)}" y2="${up?yy+6:yy-16}" stroke="currentColor" opacity=".6"/><circle cx="${x(y)}" cy="150" r="5" fill="currentColor"/><text x="${x(y)+(y>2015?-6:6)}" y="${yy}" font-size="12" text-anchor="${y>2015?"end":"start"}" fill="currentColor"${me?' font-weight="700"':""}>${y} ${t2}</text></g>`; });
-    g+=small(50,300,"Bold: schemes taught in this lesson. Grey: covered in other lessons.");
+    let g=`<line x1="130" y1="24" x2="130" y2="${30+ev.length*24}" stroke="currentColor" stroke-width="2" opacity=".3"/>`;
+    ev.forEach(([y,t2,me],i)=>{ const yy=34+i*24, cls=me?"c-client":"c-muted";
+      g+=`<g class="tev ${cls}"><text x="112" y="${yy+4}" text-anchor="end" font-size="12.5" class="mono" fill="currentColor">${y}</text><circle cx="130" cy="${yy}" r="5" fill="currentColor"/><text x="146" y="${yy+4}" font-size="13" fill="currentColor"${me?' font-weight="700"':""}>${t2}</text></g>`; });
+    g+=small(470,60,"Bold blue: schemes taught in this lesson.")+small(470,78,"Grey: covered in other lessons.");
     return svg(310,g,"Timeline from 1978 to 2025 of the early fully homomorphic encryption schemes."); },
   play(){ pop(".tev",0,110); },
   math:()=>`<p>Rivest, Adleman, Dertouzos, "On data banks and privacy homomorphisms" (1978). Gentry, STOC 2009. van Dijk–Gentry–Halevi–Vaikuntanathan, EUROCRYPT 2010. Smart–Vercauteren, PKC 2010. Brakerski–Vaikuntanathan, FOCS 2011. López-Alt–Tromer–Vaikuntanathan, STOC 2012. Bos–Lauter–Loftus–Naehrig 2013. Yang–Yu–Susilo, CRYPTO 2025.</p>`,
@@ -77,10 +76,10 @@ const steps=[
 { key:"Noise growth", who:"server", whoT:"server", at:1, budget:()=>R.sq.filter(s=>s.ok).length+" squarings ok", scale:"integers mod t", err:()=>0,
   title:"Each multiplication doubles the noise",
   cap:()=>`Squaring c_z repeatedly doubles the noise bits: ${R.dzNoise} → ${R.sq.map(s=>s.pred).join(" → ")}. Once the noise passes p (${R.pB} bits), decryption returns garbage. Here that happens at squaring ${(R.sq.find(s=>!s.ok)||{k:"—"}).k}.`,
-  scene(){ const X0=180, sc=v=>(560*Math.min(v,160))/160, pX=X0+sc(R.pB);
+  scene(){ const X0=180, sc=v=>(420*Math.min(v,300))/300, pX=X0+sc(R.pB);
     let g=small(40,30,"NOISE SIZE IN BITS AFTER EACH SQUARING (the secret p has "+R.pB+" bits)");
     const rows=[{k:0,pred:R.dzNoise,ok:true}].concat(R.sq);
-    rows.forEach((s,i)=>{ const y=48+i*42; g+=`<g class="nr">${lbl(40,y+18,i?"after "+s.k+" squaring"+(s.k>1?"s":""):"c_z")}<g class="${s.ok?"c-noise":"c-warn"}"><rect class="nb" x="${X0}" y="${y}" width="${sc(s.pred)}" height="24" rx="3" fill="currentColor" fill-opacity="${s.ok?".75":".9"}"/><text x="${X0+sc(s.pred)+8}" y="${y+17}" font-size="12" fill="currentColor">${s.pred} bits ${s.ok?"✓ decrypts":"✗ wrong"}</text></g></g>`; });
+    rows.forEach((s,i)=>{ const y=48+i*42; g+=`<g class="nr">${lbl(40,y+18,i?"after "+s.k+" squaring"+(s.k>1?"s":""):"c_z")}<g class="${s.ok?"c-noise":"c-warn"}"><rect class="nb" x="${X0}" y="${y}" width="${sc(s.pred)}" height="24" rx="3" fill="currentColor" fill-opacity="${s.ok?".75":".9"}"/><text x="620" y="${y+17}" font-size="12.5" fill="currentColor">${s.pred} bits ${s.ok?"✓ decrypts":"✗ wrong"}</text></g></g>`; });
     g+=`<g class="c-client"><line x1="${pX}" y1="40" x2="${pX}" y2="262" stroke="currentColor" stroke-width="2" stroke-dasharray="5 4"/><text x="${pX+6}" y="270" font-size="12" fill="currentColor">p (${R.pB} bits)</text></g>`;
     return svg(285,g,"Bar chart of noise bits doubling with each squaring until it crosses the size of the secret p and decryption fails."); },
   play(){ growX(".nb",0,220); },
