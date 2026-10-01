@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Visual FHE Lessons</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lesson.css">
+<style>.fam{display:grid;gap:10px}
+.fam h2{font-size:20px;margin-top:10px}
+.lgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.lcard{display:grid;gap:6px;align-content:start;background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;text-decoration:none;color:var(--ink);min-width:0}
+.lcard:hover{border-color:var(--client)}
+.lcard .no{font:600 12px var(--mono);color:var(--muted)}
+.lcard b{font:700 18px var(--display)}
+.lcard .sch{font-size:13.5px;color:var(--muted)}
+.lcard .res{font:13px var(--mono);color:var(--client)}
+.pending{opacity:.55;pointer-events:none}</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="top"><span><a href="../index.html">← Schemes table</a> · <a href="compare.html">Compare all</a></span><span class="muted">20 lessons, one shared neuron</span><button class="ghost" id="theme" type="button">Theme</button></div>
+  <h1>Visual FHE Lessons</h1>
+  <p style="max-width:68ch">Each lesson runs the same tiny LLM neuron, y = ReLU(0.5·x₁ − 0.25·x₂ + 0.1) with x = [1.5, 2.0], through a real toy version of one scheme, step by step and animated. Compare how every scheme handles the linear part and the ReLU.</p>
+</header>
+<main id="list" class="fam"></main>
+</div>
+<script src="lessons.js"></script>
+<script src="cards/ckks.js" onerror="this.remove()"></script>
+<script src="cards/ckks-variants.js" onerror="this.remove()"></script>
+<script src="cards/bfv.js" onerror="this.remove()"></script>
+<script src="cards/bgv.js" onerror="this.remove()"></script>
+<script src="cards/gbfv.js" onerror="this.remove()"></script>
+<script src="cards/tfhe.js" onerror="this.remove()"></script>
+<script src="cards/fhew.js" onerror="this.remove()"></script>
+<script src="cards/switching.js" onerror="this.remove()"></script>
+<script src="cards/ckks-exact.js" onerror="this.remove()"></script>
+<script src="cards/gentry-lee.js" onerror="this.remove()"></script>
+<script src="cards/threshold.js" onerror="this.remove()"></script>
+<script src="cards/multikey.js" onerror="this.remove()"></script>
+<script src="cards/transcipher.js" onerror="this.remove()"></script>
+<script src="cards/paillier.js" onerror="this.remove()"></script>
+<script src="cards/phe-classics.js" onerror="this.remove()"></script>
+<script src="cards/fhe-history.js" onerror="this.remove()"></script>
+<script src="cards/secret-sharing.js" onerror="this.remove()"></script>
+<script src="cards/garbled.js" onerror="this.remove()"></script>
+<script src="cards/fss.js" onerror="this.remove()"></script>
+<script src="cards/hss-fe.js" onerror="this.remove()"></script>
+<script>
+document.getElementById("theme").onclick=()=>{const r=document.documentElement;const d=r.dataset.theme?r.dataset.theme==="dark":matchMedia("(prefers-color-scheme: dark)").matches;r.dataset.theme=d?"light":"dark";};
+const fams=[...new Set(LESSONS.map(l=>l.family))];
+const C=window.LESSON_CARDS||{};
+document.getElementById("list").innerHTML=fams.map(f=>`<section class="fam"><h2>${f}</h2><div class="lgrid">${LESSONS.filter(l=>l.family===f).map(l=>{const c=C[l.id];return `<a class="lcard${c?"":" pending"}" href="${l.file}"><span class="no">LESSON ${l.no}${c?"":" · in preparation"}</span><b>${l.title}</b><span class="sch">${l.schemes.join(" · ")}</span>${c?`<span class="res">neuron result: ${c.result}</span>`:""}</a>`}).join("")}</div></section>`).join("");
+</script>
+</body>
+</html>

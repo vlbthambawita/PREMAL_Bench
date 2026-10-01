@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Scheme Comparison Cards</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lesson.css">
+<style>.cmp{overflow-x:auto;background:var(--panel);border:1px solid var(--rule);border-radius:10px}
+.cmp table{border-collapse:collapse;min-width:1100px;font-size:14px;width:100%}
+.cmp th,.cmp td{text-align:left;vertical-align:top;padding:9px 12px;border-bottom:1px solid var(--rule)}
+.cmp th{background:var(--paper);font:600 11.5px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);white-space:nowrap}
+.cmp td.name{min-width:170px}
+.cmp td.name a{font:700 15px var(--display)}
+.cmp td.res{font-family:var(--mono);min-width:150px}
+.pill{display:inline-block;font:600 11.5px var(--mono);padding:2px 8px;border-radius:999px;border:1px solid currentColor;white-space:nowrap}
+tr.fam td{background:var(--paper);font:700 13px var(--display);color:var(--muted)}
+.ctl{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.ctl select{font:14px var(--body);padding:6px 8px;border-radius:6px;border:1px solid var(--rule);background:var(--panel);color:var(--ink)}</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="top"><span><a href="../index.html">← Schemes table</a> · <a href="index.html">All lessons</a></span><span class="muted">same neuron, every scheme</span><button class="ghost" id="theme" type="button">Theme</button></div>
+  <h1>Scheme Comparison Cards</h1>
+  <p style="max-width:68ch">The closing card of every lesson, side by side. Each row is one lesson and each column is one row of the card. Click a lesson name to open it.</p>
+</header>
+<div class="ctl"><label for="cols" class="muted">Columns</label><select id="cols"><option value="all">All card rows</option><option value="noise">Linear, ReLU, noise</option><option value="budget">Linear, ReLU, budget</option><option value="security">Linear, ReLU, security</option></select><span class="muted">True answer: y = 0.35. Exact schemes return it exactly; approximate ones return a nearby value.</span></div>
+<div class="cmp"><table><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
+</div>
+<script src="lessons.js"></script>
+<script src="cards/ckks.js" onerror="this.remove()"></script>
+<script src="cards/ckks-variants.js" onerror="this.remove()"></script>
+<script src="cards/bfv.js" onerror="this.remove()"></script>
+<script src="cards/bgv.js" onerror="this.remove()"></script>
+<script src="cards/gbfv.js" onerror="this.remove()"></script>
+<script src="cards/tfhe.js" onerror="this.remove()"></script>
+<script src="cards/fhew.js" onerror="this.remove()"></script>
+<script src="cards/switching.js" onerror="this.remove()"></script>
+<script src="cards/ckks-exact.js" onerror="this.remove()"></script>
+<script src="cards/gentry-lee.js" onerror="this.remove()"></script>
+<script src="cards/threshold.js" onerror="this.remove()"></script>
+<script src="cards/multikey.js" onerror="this.remove()"></script>
+<script src="cards/transcipher.js" onerror="this.remove()"></script>
+<script src="cards/paillier.js" onerror="this.remove()"></script>
+<script src="cards/phe-classics.js" onerror="this.remove()"></script>
+<script src="cards/fhe-history.js" onerror="this.remove()"></script>
+<script src="cards/secret-sharing.js" onerror="this.remove()"></script>
+<script src="cards/garbled.js" onerror="this.remove()"></script>
+<script src="cards/fss.js" onerror="this.remove()"></script>
+<script src="cards/hss-fe.js" onerror="this.remove()"></script>
+<script>
+document.getElementById("theme").onclick=()=>{const r=document.documentElement;const d=r.dataset.theme?r.dataset.theme==="dark":matchMedia("(prefers-color-scheme: dark)").matches;r.dataset.theme=d?"light":"dark";};
+const C=window.LESSON_CARDS||{};
+const cols=[["slot","A slot holds"],["linear","Linear part"],["relu","ReLU"],["noise","Noise"],["budget","Budget used"],["refresh","Refresh"],["security","Security"]];
+const pill=t=>{ if(!t) return ""; const s=t.toLowerCase(); const cls=s.startsWith("exact")?"c-ok":s.startsWith("approx")?"c-noise":"c-muted"; return `<span class="pill ${cls}">${t}</span>`; };
+function render(){ const show=document.getElementById("cols").value; const use=show==="all"?cols:cols.filter(c=>c[0]===show||["linear","relu"].includes(c[0]));
+  const fams=[...new Set(LESSONS.map(l=>l.family))];
+  document.getElementById("thead").innerHTML=`<tr><th>Lesson</th><th>Our neuron gives</th><th>Result</th><th>Interaction</th>${use.map(c=>`<th>${c[1]}</th>`).join("")}</tr>`;
+  document.getElementById("tbody").innerHTML=fams.map(f=>`<tr class="fam"><td colspan="${4+use.length}">${f}</td></tr>`+LESSONS.filter(l=>l.family===f).map(l=>{const c=C[l.id]; if(!c) return `<tr><td class="name">${l.no}. ${l.title}</td><td colspan="${3+use.length}" class="muted">in preparation</td></tr>`;
+    return `<tr><td class="name"><span class="muted mono">${l.no}.</span> <a href="${l.file}">${l.title}</a></td><td class="res">${c.result||""}</td><td>${pill(c.exact)}</td><td>${c.interaction||""}</td>${use.map(k=>`<td>${c[k[0]]||""}</td>`).join("")}</tr>`;}).join("")).join("");
+}
+document.getElementById("cols").onchange=render; render();
+</script>
+</body>
+</html>

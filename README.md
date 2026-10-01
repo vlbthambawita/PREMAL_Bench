@@ -26,6 +26,7 @@ Columns: scheme, year, hardness assumption, plaintext type, SIMD packing, bootst
 original paper, implementing libraries, status, plus follow-up variants in the expandable details.
 
 Secondary pages:
+- `docs/learn/`: 20 visual lessons (one per scheme family), `learn/index.html` lists them and `learn/compare.html` compares their summary cards.
 - `docs/systems.html`: 137 papers, frameworks, libraries and accelerators that use these schemes.
 - `docs/references.html`: all 107 references of the SoK with source links.
 

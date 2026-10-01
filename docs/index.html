@@ -79,6 +79,8 @@ footer{max-width:1400px;margin:0 auto;padding:16px;color:var(--muted);font-size:
 .libs a{display:inline-block;margin:0 6px 2px 0;font-size:12.5px;white-space:nowrap}
 td.llm{min-width:240px}
 .kind{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+a.lesson{display:inline-block;margin-top:5px;font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;border:1px solid var(--accent);text-decoration:none;white-space:nowrap}
+a.lesson:hover{background:var(--accent-soft)}
 </style>
 </head>
 <body>
@@ -88,7 +90,7 @@ td.llm{min-width:240px}
   <p class="lede">Encryption <b>schemes</b> that can replace or extend CKKS for private LLM inference. Each row is a scheme or a scheme-level variant, not an application paper.
   The starting point is <a href="https://eprint.iacr.org/2026/935">“SoK: Private LLM Inference using Approximate Homomorphic Encryption”</a> (Al Badawi, Alexandru, Polyakov, Vaikuntanathan, 2026), which studies only CKKS.</p>
   <div class="stats" id="stats"></div>
-  <p><a href="systems.html">Systems and papers that use these schemes →</a> · <a href="references.html">All 107 SoK references →</a> · <a href="learn/ckks.html">Lesson: CKKS step by step →</a> · <a href="data/schemes.json">Table as JSON</a></p>
+  <p><a href="systems.html">Systems and papers that use these schemes →</a> · <a href="references.html">All 107 SoK references →</a> · <a href="learn/index.html"><b>Visual lessons, one per scheme →</b></a> · <a href="learn/compare.html">Compare all schemes →</a> · <a href="data/schemes.json">Table as JSON</a></p>
 </header>
 <main>
   <details class="guide">
@@ -100,6 +102,7 @@ td.llm{min-width:240px}
       <li><b>Bootstrapping</b> says whether and how cheaply ciphertext noise can be refreshed, which bounds circuit depth.</li>
       <li><b>Fit for LLM inference</b> is a one-line judgement of strengths and limits against CKKS.</li>
       <li>Group 9 lists non-HE primitives (secret sharing, garbled circuits, function secret sharing, functional encryption). They need interaction or leak more, but are the main competitors in practice.</li>
+      <li>Every scheme links to a <b>visual lesson</b> that runs the same tiny LLM neuron through a real toy version of the scheme, step by step.</li>
       <li>Click <b>More</b> for the original paper title, authors, venue and notable follow-up papers.</li>
     </ul>
   </details>
@@ -135,9 +138,12 @@ td.llm{min-width:240px}
   Data lives in <span class="mono">docs/data/schemes.json</span>. Paper links point to the IACR ePrint archive or the publisher DOI. Compiled October 2026 from the SoK and an IACR ePrint literature search.
 </footer>
 <script src="data/schemes.js"></script>
+<script src="learn/lessons.js"></script>
 <script>
 (function(){
   const M=window.SCHEMES||[];
+  const LMAP={}; (window.LESSONS||[]).forEach(l=>l.schemes.forEach(n=>LMAP[n]=l));
+  M.forEach(m=>{ const l=LMAP[m.name]; if(l){ m.lesson=`learn/${l.file}`; m.lessonNo=l.no; } });
   const groups=[...new Set(M.map(m=>m.group))].sort();
   const gColor=g=>`var(--g${g.charAt(0)})`;
   const $=id=>document.getElementById(id);
@@ -166,7 +172,7 @@ td.llm{min-width:240px}
     let h='',last=null;
     rows.forEach(m=>{
       if(!sortKey&&m.group!==last){last=m.group;h+=`<tr class="grouphead" style="--gc:${gColor(m.group)}"><td colspan="11">${esc(m.group)} <span class="muted">(${rows.filter(r=>r.group===m.group).length})</span></td></tr>`;}
-      h+=`<tr class="item"><td class="name"><b>${esc(m.name)}</b><span class="kind">${esc(m.kind)}</span></td><td>${esc(m.year)}</td><td>${esc(m.assumption)}</td><td>${esc(m.plaintext)}</td><td>${esc(m.simd)}</td><td>${esc(m.boot)}</td>
+      h+=`<tr class="item"><td class="name"><b>${esc(m.name)}</b><span class="kind">${esc(m.kind)}</span>${m.lesson?`<br><a class="lesson" href="${esc(m.lesson)}">▶ Visual lesson ${m.lessonNo}</a>`:""}</td><td>${esc(m.year)}</td><td>${esc(m.assumption)}</td><td>${esc(m.plaintext)}</td><td>${esc(m.simd)}</td><td>${esc(m.boot)}</td>
         <td class="llm">${esc(m.llm)}</td><td class="links"><a href="${esc(m.paper)}" target="_blank" rel="noopener">${esc(m.venue)}</a></td>
         <td class="libs">${m.libs.length?m.libs.map(([n,u])=>`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(n)}</a>`).join(''):'<span class="muted">none public</span>'}</td>
         <td><span class="tag ${stCls(m.status)}">${esc(m.status)}</span></td>
